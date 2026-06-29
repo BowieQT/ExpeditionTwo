@@ -141,6 +141,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                 var expedition2RunesWeights = GameController.Files.Expedition2RunesWeights.EntriesList;
                 var minimapTextpadding = new DXTPadding(1);
                 var minimapColoredTextOptions =  new ColoredTextOptions { BgColor = Settings.BG_Color };
+                var rerolledminimapColoredTextOptions = minimapColoredTextOptions with { Padding = new DXTPadding(2), BorderColor = Settings.RerolledBorder_Color };
                 var inGameColoredTextOptions = new ColoredTextOptions { BgColor = Settings.BG_Color };
                  
                 foreach (var remnant in remnants) {
@@ -148,13 +149,25 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                     var states = entity?.GetComponent<StateMachine>()?.States;
                     if (entity == null) continue;
 
+                    // 7? = Remnant not exploded  
                     var remnantUnclaimedReward = states != null && states.Any(s => s.Name == "activated" && ((int)s.Value == 6));
                     var remnantComplete = states != null && states.Any(s => s.Name == "activated" && ((int)s.Value == 8));
                     var remnantRerolled = states != null && states.Any(s => s.Name == "is_rerolled" && ((int)s.Value == 1));
                     var remnantHovered = states != null && states.Any(s => s.Name == "in_placing_range" && ((int)s.Value == 1));
 
+                    var remnantRect = remnant.Expedition2EncounterLabel.GetClientRect();
+                    var bottomLeft = remnantRect.BottomLeft;
+                    bottomLeft += new Vector2(Settings.InGameRemnant_RenderOffset.X, Settings.InGameRemnant_RenderOffset.Y);
+                    var y = bottomLeft.Y;
+                    var first = true;
+
                     if (remnantComplete) {
-                        if (!Settings.DisplayCompletedRemnants) continue;
+                        if (Settings.DisplayCompletedRemnants) {
+                            var coloredText = new ColoredText();
+                            coloredText.Add("Unclaimed Remnant Reward!!", Settings.LabelText_Color);
+                            coloredText.Draw(Graphics, bottomLeft with { Y = y }, inGameColoredTextOptions);
+                        }
+                        continue;
                     }
                     else if (remnantUnclaimedReward) {
                         if (!Settings.DisplayUnclaimedRewardRemnants) continue;
@@ -169,12 +182,6 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                     if (Settings.InGameRemnant_MaxItemsToShow > 0) {
                         remanantRecipes = remanantRecipes.Take(Settings.InGameRemnant_MaxItemsToShow).ToList();
                     }
-                    var remnantRect = remnant.Expedition2EncounterLabel.GetClientRect();
-                    var bottomLeft = remnantRect.BottomLeft;
-                    bottomLeft += new Vector2(Settings.InGameRemnant_RenderOffset.X, Settings.InGameRemnant_RenderOffset.Y);
-                    var y = bottomLeft.Y;
-
-                    var first = true;
 
                     // Hover
                     if (remnantHovered) Graphics.DrawFrame(remnantRect, Settings.ExplosiveHover_Color, 0, 5, 0);
@@ -183,7 +190,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                         // Minimap Text
                         if (first && Settings.MinimapRemnant_Show) {
                             var coloredMinimapText = GetMapColoredText(recipePrice, allValidRecipes, remnant.Expedition2EncounterLabel.Data, remnantRerolled);
-                            coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), minimapColoredTextOptions);
+                            coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), remnantRerolled ? rerolledminimapColoredTextOptions  : minimapColoredTextOptions);
                         }
                         // Ingame Text
                         var coloredText = new ColoredText();

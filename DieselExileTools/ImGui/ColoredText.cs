@@ -25,7 +25,7 @@ public static partial class DXT {
         public SColor BorderColor { get; init; } = SColor.Transparent; 
         public DXTPadding Padding { get; init; } = new DXTPadding(1);
         public int Rounding { get; init; } = 0;
-        public int BorderThickness { get; init; } = 0; 
+        public int BorderThickness { get; init; } = 1; 
 
         public static readonly ColoredTextOptions Default = new();
     }
@@ -124,7 +124,7 @@ public static partial class DXT {
                 g.DrawBox(topLeft, bottomRight, options.BgColor, options.Rounding);
             }
 
-            if (options.BorderThickness > 0) {
+            if (options.BorderColor.A > 0 && options.BorderThickness > 0) {
                 SVector2 topLeft = new(pos.X - options.Padding.Left, pos.Y - options.Padding.Top);
                 SVector2 bottomRight = topLeft + size;
                 g.DrawFrame(topLeft, bottomRight, options.BorderColor, options.Rounding, options.BorderThickness, 0);

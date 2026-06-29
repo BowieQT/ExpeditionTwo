@@ -29,7 +29,7 @@ public sealed class Settings : ISettings {
 
     public List<PriceOverride> PriceOverrides = [];
 
-    public bool DisplayUnclaimedRewardRemnants = false;
+    public bool DisplayUnclaimedRewardRemnants = true;
     public bool DisplayCompletedRemnants = false;
 
 
@@ -44,6 +44,7 @@ public sealed class Settings : ISettings {
     public SColor BG_Color = SColor.FromArgb(200, 0, 0, 0);
     public SColor ExplosiveHover_Color = SColor.FromArgb(200, 0, 0);
 
+    public SColor RerolledBorder_Color = SColor.FromArgb(255, 82, 82);
 
     public SColor LabelText_Color = SColor.FromArgb(207, 216, 220);
     public SColor ValueText_Color = SColor.FromArgb(255, 61, 0);

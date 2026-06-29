@@ -32,7 +32,7 @@ public sealed class UserInterface : PluginModule {
 
         DXT.Checkbox.Draw("Show Remnants with Unclaimed Rewards", ref Settings.DisplayUnclaimedRewardRemnants);
 
-        DXT.Checkbox.Draw("Show Completed Remnants", ref Settings.DisplayCompletedRemnants);
+        //DXT.Checkbox.Draw("Show Completed Remnants", ref Settings.DisplayCompletedRemnants);
 
         ImGui.Spacing(); ImGui.Separator(); ImGui.Spacing();
 
@@ -66,6 +66,10 @@ public sealed class UserInterface : PluginModule {
         DXT.ColorSelect.Draw("BG_Color", "Text BG Color", ref Settings.BG_Color);
         ImGui.SameLine();
         ImGui.Text("Text BG Color");
+
+        DXT.ColorSelect.Draw("RerolledBorder_Color", "Rerolled Rune Border", ref Settings.RerolledBorder_Color);
+        ImGui.SameLine();
+        ImGui.Text("Rerolled Rune Border");
 
         DXT.ColorSelect.Draw("ExplosiveHover_Color", "Explosive Hover Border Color", ref Settings.ExplosiveHover_Color);
         ImGui.SameLine();
