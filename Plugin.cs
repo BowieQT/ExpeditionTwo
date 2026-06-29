@@ -155,22 +155,17 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                     var remnantRerolled = states != null && states.Any(s => s.Name == "is_rerolled" && ((int)s.Value == 1));
                     var remnantHovered = states != null && states.Any(s => s.Name == "in_placing_range" && ((int)s.Value == 1));
 
-                    var remnantRect = remnant.Expedition2EncounterLabel.GetClientRect();
-                    var bottomLeft = remnantRect.BottomLeft;
-                    bottomLeft += new Vector2(Settings.InGameRemnant_RenderOffset.X, Settings.InGameRemnant_RenderOffset.Y);
-                    var y = bottomLeft.Y;
-                    var first = true;
 
                     if (remnantComplete) {
-                        if (Settings.DisplayCompletedRemnants) {
-                            var coloredText = new ColoredText();
-                            coloredText.Add("Unclaimed Remnant Reward!!", Settings.LabelText_Color);
-                            coloredText.Draw(Graphics, bottomLeft with { Y = y }, inGameColoredTextOptions);
-                        }
-                        continue;
+                        if (!Settings.DisplayCompletedRemnants) continue;
                     }
                     else if (remnantUnclaimedReward) {
-                        if (!Settings.DisplayUnclaimedRewardRemnants) continue;
+                        if (Settings.DisplayUnclaimedRewardRemnants) {
+                            var coloredText = new ColoredText();
+                            coloredText.Add("Unclaimed Remnant Reward!!", Settings.LabelText_Color);
+                            coloredText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), inGameColoredTextOptions);
+                        }
+                        continue;
                     }
 
                     var remanantRuneData = remnant.Expedition2EncounterLabel?.Data;
@@ -185,7 +180,13 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                         remanantRecipes = remanantRecipes.Take(Settings.InGameRemnant_MaxItemsToShow).ToList();
                     }
 
+                    var remnantRect = remnant.Expedition2EncounterLabel.GetClientRect();
+                    var bottomLeft = remnantRect.BottomLeft;
+                    bottomLeft += new Vector2(Settings.InGameRemnant_RenderOffset.X, Settings.InGameRemnant_RenderOffset.Y);
+                    var y = bottomLeft.Y;
+                    var first = true;
                     // Hover
+
                     if (remnantHovered) Graphics.DrawFrame(remnantRect, Settings.ExplosiveHover_Color, 0, 5, 0);
 
                     foreach (var (recipe, recipePrice) in remanantRecipes) {
