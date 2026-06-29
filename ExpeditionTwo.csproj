@@ -1,0 +1,148 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0-windows</TargetFramework>
+        <Nullable>enable</Nullable>
+        <OutputType>Library</OutputType>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
+		<UseWindowsForms>true</UseWindowsForms>
+    </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="config\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Media\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+	<!-- Deploy plugin for testing -->
+	<Target Name="DeployPlugin" BeforeTargets="Build" Condition="'$(BuildingInsideVisualStudio)' == 'true'">
+		<Exec Command="&quot;$(SolutionDir)PluginDeployer\bin\Debug\net8.0\PluginDeployer.exe&quot; Deploy ExileCore2 &quot;$(MSBuildProjectDirectory)&quot; &quot;$(SolutionDir) &quot;" />
+	</Target>
+
+	<!-- Reference to DieselExileTools -->
+	<ItemGroup Condition="'$(BuildingInsideVisualStudio)' == 'true'">
+		<ProjectReference Include="$(SolutionDir)DieselExileTools\DieselExileTools.ExileCore2\DieselExileTools.ExileCore2.csproj" />
+	</ItemGroup>	
+
+  <!-- Reference ExileCore2 and GameOffsets2 and NuGet packages -->
+  <ItemGroup>
+    <!-- Core -->
+    <Reference Include="ExileCore2">
+      <HintPath>$(exilecore2Package)\ExileCore2.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="GameOffsets2">
+      <HintPath>$(exilecore2Package)\GameOffsets2.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- UI / Rendering -->
+    <Reference Include="ImGui.NET">
+      <HintPath>$(exilecore2Package)\ImGui.NET.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="SixLabors.ImageSharp">
+      <HintPath>$(exilecore2Package)\SixLabors.ImageSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Vortice.Direct3D11">
+      <HintPath>$(exilecore2Package)\Vortice.Direct3D11.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Vortice.DXGI">
+      <HintPath>$(exilecore2Package)\Vortice.DXGI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Vortice.Mathematics">
+      <HintPath>$(exilecore2Package)\Vortice.Mathematics.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="SharpGen.Runtime">
+      <HintPath>$(exilecore2Package)\SharpGen.Runtime.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="SharpGen.Runtime.COM">
+      <HintPath>$(exilecore2Package)\SharpGen.Runtime.COM.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- Data / LINQ -->
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(exilecore2Package)\Newtonsoft.Json.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System.Linq.Dynamic.Core">
+      <HintPath>$(exilecore2Package)\System.Linq.Dynamic.Core.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="MoreLinq">
+      <HintPath>$(exilecore2Package)\MoreLinq.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="JM.LinqFaster">
+      <HintPath>$(exilecore2Package)\JM.LinqFaster.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="ItemFilterLibrary">
+      <HintPath>$(exilecore2Package)\ItemFilterLibrary.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- Scripting / Roslyn -->
+    <Reference Include="Microsoft.CodeAnalysis">
+      <HintPath>$(exilecore2Package)\Microsoft.CodeAnalysis.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.CodeAnalysis.CSharp">
+      <HintPath>$(exilecore2Package)\Microsoft.CodeAnalysis.CSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.CodeAnalysis.Scripting">
+      <HintPath>$(exilecore2Package)\Microsoft.CodeAnalysis.Scripting.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.CodeAnalysis.CSharp.Scripting">
+      <HintPath>$(exilecore2Package)\Microsoft.CodeAnalysis.CSharp.Scripting.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- Logging -->
+    <Reference Include="Serilog">
+      <HintPath>$(exilecore2Package)\Serilog.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Serilog.Sinks.File">
+      <HintPath>$(exilecore2Package)\Serilog.Sinks.File.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- Audio -->
+    <Reference Include="NAudio">
+      <HintPath>$(exilecore2Package)\NAudio.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="NAudio.Asio">
+      <HintPath>$(exilecore2Package)\NAudio.Asio.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="NAudio.Core">
+      <HintPath>$(exilecore2Package)\NAudio.Core.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="NAudio.Midi">
+      <HintPath>$(exilecore2Package)\NAudio.Midi.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="NAudio.Wasapi">
+      <HintPath>$(exilecore2Package)\NAudio.Wasapi.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="NAudio.WinMM">
+      <HintPath>$(exilecore2Package)\NAudio.WinMM.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  
+  
+
+</Project>
