@@ -173,7 +173,9 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                         if (!Settings.DisplayUnclaimedRewardRemnants) continue;
                     }
 
-                    var remanantRecipes = GetRemanantRecipes(expedition2RunesWeights, areaLevel, allRecipes, remnant.Expedition2EncounterLabel?.Data);
+                    var remanantRuneData = remnant.Expedition2EncounterLabel?.Data;
+                    var passedOnRunePositions = remanantRuneData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? new List<int>();
+                    var remanantRecipes = GetRemanantRecipes(expedition2RunesWeights, areaLevel, allRecipes, remanantRuneData);
                     var allValidRecipes = remanantRecipes.Select(remanantRecipe => remanantRecipe.recipe).ToList();
 
                     if (Settings.InGameRemnant_MinimumValueToShow > 0) {
@@ -189,26 +191,52 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                     foreach (var (recipe, recipePrice) in remanantRecipes) {
                         // Minimap Text
                         if (first && Settings.MinimapRemnant_Show) {
-                            var coloredMinimapText = GetMapColoredText(recipePrice, allValidRecipes, remnant.Expedition2EncounterLabel.Data, remnantRerolled);
-                            coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), remnantRerolled ? rerolledminimapColoredTextOptions  : minimapColoredTextOptions);
+                            //var coloredMinimapText = GetMapColoredText(recipePrice, allValidRecipes, remnant.Expedition2EncounterLabel.Data, remnantRerolled);
+                            var coloredMinimapText = new ColoredText();
+                            var defaultColor = Settings.LabelText_Color;
+
+                            coloredMinimapText.Add($"{(remnantRerolled ? "*" : "")}Rune[{remanantRuneData.RuneCount}]:", defaultColor);
+                            coloredMinimapText.Add($"{(recipePrice.Overridden ? "~" : "")}{recipePrice.Value:F0}", recipePrice.Color);
+
+                            if (Settings.MinimapRemnant_ShowTransferred && remanantRuneData?.SelectedRecipe?.Runes != null && passedOnRunePositions.Count > 0) {
+                                var transferredRunes = passedOnRunePositions
+                                    .Select(pos => remanantRuneData.SelectedRecipe.Runes.ElementAtOrDefault(pos))
+                                    .Where(x => x != null)
+                                    .OrderBy(x => x.Id)
+                                    .ToList();
+
+                                if (transferredRunes.Count > 0) coloredMinimapText.Add(" [T]:", defaultColor);
+
+                                for (int i = 0; i < transferredRunes.Count; i++) {
+                                    var rune = transferredRunes[i];
+
+                                    if (i > 0) coloredMinimapText.Add(", ", defaultColor);
+
+                                    coloredMinimapText.Add(rune.Id, GetRuneColor(rune.Id));
+                                }
+                            }
+                            coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), remnantRerolled ? rerolledminimapColoredTextOptions : minimapColoredTextOptions);
                         }
                         // Ingame Text
-                        var coloredText = new ColoredText();
-                        coloredText.Add($"{(recipePrice.Overridden ? "~" : "")}{recipePrice.Value,7:F0}", recipePrice.Color);
-                        coloredText.Add($" {(string.IsNullOrWhiteSpace(recipe.Description) ? recipe.Reward?.BaseName : recipe.Description)}", recipePrice.Color);
-                        coloredText.Add($"  x{recipe.RewardCount}", recipePrice.Color);
-                        var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, inGameColoredTextOptions);
+                        if (!remnantRerolled || first) { 
+                            var coloredText = new ColoredText();
+                            var displayValue = recipePrice.Value.ToString(recipePrice.Overridden ? "~F0" : "F0");
 
-                        y += size.Y;
+                            coloredText.Add(displayValue.PadLeft(remnantRerolled ? 0 : 7), recipePrice.Color);
+                            coloredText.Add($" {(string.IsNullOrWhiteSpace(recipe.Description) ? recipe.Reward?.BaseName : recipe.Description)}", recipePrice.Color);
+                            coloredText.Add($"  x{recipe.RewardCount}", recipePrice.Color);
+                            var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, inGameColoredTextOptions);
+                            y += size.Y;
+                        }
 
                         first = false;
                     }
 
-                    // Ingame Trandeferred Rune Text
+                    // Ingame Transferred Rune Text
                     y += 2;
-                    if (Settings.InGameRemnant_ShowTransferred && remnant.Expedition2EncounterLabel.Data.PassedOnRunePositions is { Count: > 0 } positions) {
+                    if (Settings.InGameRemnant_ShowTransferred && passedOnRunePositions.Count > 0) {
                         if (!remnantRerolled) {
-                            foreach (var position in positions) {
+                            foreach (var position in passedOnRunePositions) {
                                 var runes = allValidRecipes
                                     .Select(x => x.Runes.ElementAtOrDefault(position))
                                     .Where(x => x != null)
@@ -217,7 +245,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                                     .ToList();
 
                                 var coloredText = new ColoredText();
-                                coloredText.Add($"Rune: {position + 1} Transfers: ", Settings.LabelText_Color);
+                                coloredText.Add($"All Rune {position + 1} Transfers: ", Settings.LabelText_Color);
 
                                 for (int i = 0; i < runes.Count; i++) {
                                     if (i > 0) coloredText.Add(", ", Settings.LabelText_Color);
@@ -228,17 +256,18 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                                 var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, inGameColoredTextOptions);
                                 y += size.Y;
                             }
+                            y += 2;
                         }
-                        else if(remnant.Expedition2EncounterLabel.Data?.SelectedRecipe?.Runes != null && remnant.Expedition2EncounterLabel.Data?.PassedOnRunePositions is { Count: > 0 } rpositions) {
+                        if (remanantRuneData?.SelectedRecipe?.Runes != null && passedOnRunePositions.Count > 0) {
                             var coloredText = new ColoredText();
 
-                            var transferredRunes = rpositions
-                                .Select(pos => remnant.Expedition2EncounterLabel.Data.SelectedRecipe.Runes.ElementAtOrDefault(pos))
+                            var transferredRunes = passedOnRunePositions
+                                .Select(pos => remanantRuneData.SelectedRecipe.Runes.ElementAtOrDefault(pos))
                                 .Where(x => x != null)
                                 .OrderBy(x => x.Id)
                                 .ToList();
 
-                            if (transferredRunes.Count > 0) coloredText.Add(" [T]:", Settings.LabelText_Color);
+                            if (transferredRunes.Count > 0) coloredText.Add($"{(remnantRerolled ? "Locked" : "Selected")} Rune Transfers: ", Settings.LabelText_Color);
 
                             for (int i = 0; i < transferredRunes.Count; i++) {
                                 var rune = transferredRunes[i];
@@ -343,7 +372,6 @@ public class Plugin : BaseSettingsPlugin<Settings> {
     private SColor GetRuneColor(string runeId) {
         return _runeColors.TryGetValue(runeId, out var color) ? color : Settings.LabelText_Color;
     }
-
     private ColoredText GetMapColoredText(RecipePrice recipePrice, IReadOnlyCollection<Expedition2Recipe> recipes, Expedition2EncounterData data, bool rerolled) {
         var coloredText = new ColoredText();
         var defaultColor = Settings.LabelText_Color;
