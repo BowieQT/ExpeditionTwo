@@ -32,6 +32,8 @@ public sealed class Settings : ISettings {
     public bool DisplayUnclaimedRewardRemnants = true;
     public bool DisplayCompletedRemnants = false;
 
+    public bool ShowValueInDivines = false;
+
 
     public int InGameRemnant_MaxItemsToShow = 0;
     public int InGameRemnant_MinimumValueToShow = 0;

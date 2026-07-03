@@ -2,11 +2,15 @@
 using DieselExileTools.Common.Structs;
 using DieselExileTools.ExileCore2;
 using ExileCore2;
+using ExileCore2.PoEMemory;
 using ExileCore2.PoEMemory.Components;
 using ExileCore2.PoEMemory.Elements;
 using ExileCore2.PoEMemory.FilesInMemory;
+using ExileCore2.PoEMemory.MemoryObjects;
 using ExileCore2.PoEMemory.Models;
 using ExileCore2.Shared.Cache;
+using ExileCore2.Shared.Enums;
+using ImGuiNET;
 using Newtonsoft.Json.Linq;
 using System.Numerics;
 using static DieselExileTools.DXT;
@@ -49,7 +53,8 @@ public class Plugin : BaseSettingsPlugin<Settings> {
 
     //~~| Modules |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     private UserInterface _userInterface;
-
+    private BaseItemType _divineOrb;
+    private double _divineValue = 0; 
     public Plugin() {
         _verisiumRemnants = new TimeCache<List<VerisiumRemnant>>(() =>
             GameController.EntityListWrapper.Entities
@@ -66,6 +71,8 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                 double val;
                 bool overridden = false;
                 bool ninjaPriced = false;
+
+                if(_divineOrb != null) _divineValue = getCurrencyValue(_divineOrb); 
 
                 if (Settings.PriceOverrides.FirstOrDefault(po => po.Recipee.Value == recipe.Id) is { } over) {
                     val = over.Value;
@@ -91,8 +98,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
         CanUseMultiThreading = true;
         Initialise_DXT();
 
-
-
+        _divineOrb = GameController.Files.BaseItemTypes.Contents.FirstOrDefault(x => x.Value.BaseName == "Divine Orb").Value;
 
 
         return base.Initialise();
@@ -121,6 +127,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
 
     //--| Draw Settings |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     public override void DrawSettings() {
+        //ImGui.Text($"Divine Orb: {_divineValue}");
         UserInterface.Draw();
     }
     //--| Tick |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -128,27 +135,36 @@ public class Plugin : BaseSettingsPlugin<Settings> {
         Settings.KnownRecipes.UnionWith(_recipePrices.Value.Keys.Select(x => x.Id));
     }
     //--| Render |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    private ColoredTextOptions _inGame_ColoredTextOptions = new ColoredTextOptions { };
+    private ColoredTextOptions _minimap_ColoredTextOptions = new ColoredTextOptions { };
+    private ColoredTextOptions _minimapRerolled_ColoredTextOptions = new ColoredTextOptions { Padding = new DXTPadding(2) };
+
     public override void Render() {
         DBug.Render();
 
+        var entities = GameController.EntityListWrapper.ValidEntitiesByType[EntityType.IngameIcon]
+            .Where(x => x.Metadata.StartsWith("Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter", StringComparison.Ordinal)).ToList();
         // Render Remnants
         var areaLevel = GameController.IngameState.Data.CurrentAreaLevel;
-        var allRecipes = GameController.Files.Expedition2Recipes.EntriesList.ToLookup(x => x.RuneCountRequired);
         var remnants = _verisiumRemnants.Value;
 
         if (remnants.Count > 0) {
+            var allRecipes = GameController.Files.Expedition2Recipes.EntriesList.ToLookup(x => x.RuneCountRequired);
+
             if (allRecipes.Count > 0) {
                 var expedition2RunesWeights = GameController.Files.Expedition2RunesWeights.EntriesList;
-                var minimapTextpadding = new DXTPadding(1);
-                var minimapColoredTextOptions =  new ColoredTextOptions { BgColor = Settings.BG_Color };
-                var rerolledminimapColoredTextOptions = minimapColoredTextOptions with { Padding = new DXTPadding(2), BorderColor = Settings.RerolledBorder_Color };
-                var inGameColoredTextOptions = new ColoredTextOptions { BgColor = Settings.BG_Color };
+
+                _minimap_ColoredTextOptions.BgColor = Settings.BG_Color;
+                _minimapRerolled_ColoredTextOptions.BgColor = Settings.BG_Color;
+                _minimapRerolled_ColoredTextOptions.BorderColor = Settings.RerolledBorder_Color;
+                _inGame_ColoredTextOptions.BgColor = Settings.BG_Color;
                  
                 foreach (var remnant in remnants) {
                     var entity = remnant.LabelOnGround.ItemOnGround;
                     var states = entity?.GetComponent<StateMachine>()?.States;
                     if (entity == null) continue;
 
+                    entities.Remove(entity);
                     // 7? = Remnant not exploded  
                     var remnantUnclaimedReward = states != null && states.Any(s => s.Name == "activated" && ((int)s.Value == 6));
                     var remnantComplete = states != null && states.Any(s => s.Name == "activated" && ((int)s.Value == 8));
@@ -160,24 +176,19 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                         if (!Settings.DisplayCompletedRemnants) continue;
                     }
                     else if (remnantUnclaimedReward) {
-                        if (Settings.DisplayUnclaimedRewardRemnants) {
-                            var coloredText = new ColoredText();
-                            coloredText.Add("Unclaimed Remnant Reward!!", Settings.LabelText_Color);
-                            coloredText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), inGameColoredTextOptions);
-                        }
+                        DrawUnclaimedRemnantRewrd(entity);
                         continue;
                     }
 
-                    var remanantRuneData = remnant.Expedition2EncounterLabel?.Data;
-                    var passedOnRunePositions = remanantRuneData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? new List<int>();
-                    var remanantRecipes = GetRemanantRecipes(expedition2RunesWeights, areaLevel, allRecipes, remanantRuneData);
-                    var allValidRecipes = remanantRecipes.Select(remanantRecipe => remanantRecipe.recipe).ToList();
+                    var remnantRuneData = remnant.Expedition2EncounterLabel?.Data;
+                    var remnantTransferRunePositions = remnantRuneData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? new List<int>();
+                    var remnantRecipes = GetRemanantRecipes(expedition2RunesWeights, areaLevel, allRecipes, remnantRuneData);
 
                     if (Settings.InGameRemnant_MinimumValueToShow > 0) {
-                        remanantRecipes = remanantRecipes.Where(remanantRecipe => remanantRecipe.recipePrice.Value >= Settings.InGameRemnant_MinimumValueToShow).ToList();
+                        remnantRecipes = remnantRecipes.Where(remanantRecipe => remanantRecipe.recipePrice.Value >= Settings.InGameRemnant_MinimumValueToShow).ToList();
                     }
                     if (Settings.InGameRemnant_MaxItemsToShow > 0) {
-                        remanantRecipes = remanantRecipes.Take(Settings.InGameRemnant_MaxItemsToShow).ToList();
+                        remnantRecipes = remnantRecipes.Take(Settings.InGameRemnant_MaxItemsToShow).ToList();
                     }
 
                     var remnantRect = remnant.Expedition2EncounterLabel.GetClientRect();
@@ -189,44 +200,20 @@ public class Plugin : BaseSettingsPlugin<Settings> {
 
                     if (remnantHovered) Graphics.DrawFrame(remnantRect, Settings.ExplosiveHover_Color, 0, 5, 0);
 
-                    foreach (var (recipe, recipePrice) in remanantRecipes) {
-                        // Minimap Text
+                    foreach (var (recipe, recipePrice) in remnantRecipes) {
+                        // Minimap Display
                         if (first && Settings.MinimapRemnant_Show) {
-                            //var coloredMinimapText = GetMapColoredText(recipePrice, allValidRecipes, remnant.Expedition2EncounterLabel.Data, remnantRerolled);
-                            var coloredMinimapText = new ColoredText();
-                            var defaultColor = Settings.LabelText_Color;
-
-                            coloredMinimapText.Add($"{(remnantRerolled ? "*" : "")}Rune[{remanantRuneData.RuneCount}]:", defaultColor);
-                            coloredMinimapText.Add($"{(recipePrice.Overridden ? "~" : "")}{recipePrice.Value:F0}", recipePrice.Color);
-
-                            if (Settings.MinimapRemnant_ShowTransferred && remanantRuneData?.SelectedRecipe?.Runes != null && passedOnRunePositions.Count > 0) {
-                                var transferredRunes = passedOnRunePositions
-                                    .Select(pos => remanantRuneData.SelectedRecipe.Runes.ElementAtOrDefault(pos))
-                                    .Where(x => x != null)
-                                    .OrderBy(x => x.Id)
-                                    .ToList();
-
-                                if (transferredRunes.Count > 0) coloredMinimapText.Add(" [T]:", defaultColor);
-
-                                for (int i = 0; i < transferredRunes.Count; i++) {
-                                    var rune = transferredRunes[i];
-
-                                    if (i > 0) coloredMinimapText.Add(", ", defaultColor);
-
-                                    coloredMinimapText.Add(rune.Id, GetRuneColor(rune.Id));
-                                }
-                            }
-                            coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), remnantRerolled ? rerolledminimapColoredTextOptions : minimapColoredTextOptions);
+                            DrawRemnantOnMinimap(entity, remnantRuneData, recipePrice, remnantRerolled);
                         }
-                        // Ingame Text
+                        // Ingame Display
                         if (!remnantRerolled || first) { 
                             var coloredText = new ColoredText();
                             var displayValue = recipePrice.Value.ToString(recipePrice.Overridden ? "~F0" : "F0");
 
-                            coloredText.Add(displayValue.PadLeft(remnantRerolled ? 0 : 7), recipePrice.Color);
+                            coloredText.Add(GetValueText(recipePrice, remnantRerolled ? 0 : 7), recipePrice.Color);
                             coloredText.Add($" {(string.IsNullOrWhiteSpace(recipe.Description) ? recipe.Reward?.BaseName : recipe.Description)}", recipePrice.Color);
                             coloredText.Add($"  x{recipe.RewardCount}", recipePrice.Color);
-                            var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, inGameColoredTextOptions);
+                            var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, _inGame_ColoredTextOptions);
                             y += size.Y;
                         }
 
@@ -235,15 +222,16 @@ public class Plugin : BaseSettingsPlugin<Settings> {
 
                     // Ingame Transferred Rune Text
                     y += 2;
-                    if (Settings.InGameRemnant_ShowTransferred && passedOnRunePositions.Count > 0) {
+                    if (Settings.InGameRemnant_ShowTransferred && remnantTransferRunePositions.Count > 0) {
                         if (!remnantRerolled) {
-                            foreach (var position in passedOnRunePositions) {
-                                var runes = allValidRecipes
-                                    .Select(x => x.Runes.ElementAtOrDefault(position))
+                            foreach (var position in remnantTransferRunePositions) {
+                                var runes = remnantRecipes
+                                    .Select(item => item.recipe.Runes.ElementAtOrDefault(position)) 
                                     .Where(x => x != null)
                                     .Distinct()
                                     .OrderBy(r => r.Id)
                                     .ToList();
+
 
                                 var coloredText = new ColoredText();
                                 coloredText.Add($"All Rune {position + 1} Transfers: ", Settings.LabelText_Color);
@@ -254,16 +242,16 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                                     coloredText.Add(runes[i].Id, GetRuneColor(runes[i].Id));
                                 }
 
-                                var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, inGameColoredTextOptions);
+                                var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, _inGame_ColoredTextOptions);
                                 y += size.Y;
                             }
                             y += 2;
                         }
-                        if (remanantRuneData?.SelectedRecipe?.Runes != null && passedOnRunePositions.Count > 0) {
+                        if (remnantRuneData?.SelectedRecipe?.Runes != null && remnantTransferRunePositions.Count > 0) {
                             var coloredText = new ColoredText();
 
-                            var transferredRunes = passedOnRunePositions
-                                .Select(pos => remanantRuneData.SelectedRecipe.Runes.ElementAtOrDefault(pos))
+                            var transferredRunes = remnantTransferRunePositions
+                                .Select(pos => remnantRuneData.SelectedRecipe.Runes.ElementAtOrDefault(pos))
                                 .Where(x => x != null)
                                 .OrderBy(x => x.Id)
                                 .ToList();
@@ -278,49 +266,134 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                                 coloredText.Add(rune.Id, GetRuneColor(rune.Id));
                             }
 
-                            var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, inGameColoredTextOptions);
+                            var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, _inGame_ColoredTextOptions);
                             y += size.Y;
                         }
                     }
                 }
-                // Expedition2Window Prices
-                if (GameController.IngameState.IngameUi.Expedition2Window is { IsVisible: true } expedition2Window) {
-                    var windowRect = expedition2Window.GetClientRectCache;
-                    var bookRect = expedition2Window.GetChildFromIndices(3)?.GetClientRectCache;
-                    var bounds = (bookRect?.Width > 0) ? bookRect.Value : windowRect;
+                // remnants without label on ground
+                if (Settings.MinimapRemnant_Show) {
+                    foreach (var entity in entities) {
+                        var states = entity?.GetComponent<StateMachine>()?.States;
+                        if (entity == null) continue;
 
-                    if (!IsDrawableRect(windowRect)) return; 
+                        var remnantUnclaimedReward = states != null && states.Any(s => s.Name == "activated" && ((int)s.Value == 6));
+                        var remnantComplete = states != null && states.Any(s => s.Name == "activated" && ((int)s.Value == 8));
+                        var remnantRerolled = states != null && states.Any(s => s.Name == "is_rerolled" && ((int)s.Value == 1));
+                        var remnantHovered = states != null && states.Any(s => s.Name == "in_placing_range" && ((int)s.Value == 1));
+                        var runeCount = states?.FirstOrDefault(x => x.Name == "sockets")?.Value;
 
-                    var options = expedition2Window.Options
-                        .Where(x => x is { IsValid: true, IsVisible: true, IsVisibleLocal: true, Recipe: not null })
-                        .Select(x => (x, GetPriceOrDefault(x.Recipe)))
-                        .OrderByDescending(x => x.Item2.Value)
-                        .ToList();
-                    var first = true;
-                    foreach (var (option, recipePrice) in options) {
-                        var optionRect = option.GetClientRectCache;
-                        if (!IsDrawableRect(optionRect) ||
-                            !bounds.Intersects(optionRect) ||
-                            !bounds.Contains(optionRect.TopLeft)) {
+                        if (remnantComplete) {
+                            if (!Settings.DisplayCompletedRemnants) continue;
+                        }
+                        else if (remnantUnclaimedReward) {
+                            DrawUnclaimedRemnantRewrd(entity);
                             continue;
                         }
 
-                        var coloredText = new ColoredText();
+                        var found = false;
 
-                        coloredText.Add($"{(recipePrice.Overridden ? "~" : "")}{recipePrice.Value,5:F0}", recipePrice.Color);
-                        var position = ClampTextPosition(optionRect.TopRight, coloredText.Size, bounds);
-                        coloredText.Draw(Graphics, position, inGameColoredTextOptions);
-                        first = false;
+                        if (entity?.HashComponents.GetValueOrDefault((ushort)0x87B2) is not 0 and { } dataAddr) {
+                            var remnantRuneData = RemoteMemoryObject.GetObjectStatic<Expedition2EncounterData>(dataAddr);
+                            var remnantRecipes = GetRemanantRecipes(expedition2RunesWeights, areaLevel, allRecipes, remnantRuneData);
+                            var firstRemnantrecipe = remnantRecipes.FirstOrDefault();
+                            if (firstRemnantrecipe != default) {
+                                DrawRemnantOnMinimap(entity, remnantRuneData, firstRemnantrecipe.recipePrice, remnantRerolled);
+                                found = true;
+                            }
+                            if (!found) {
+                                if (runeCount != null) {
+                                    Graphics.DrawTextWithBackground($"Unknown rune {runeCount} sockets", Graphics.GridToMap(entity.GridPos, entity.GridPos), Color.Black);
+                                }
+                            }
+                        }
                     }
+
                 }
+                // Expedition2Window Prices
+                if (GameController.IngameState.IngameUi.Expedition2Window is { IsVisible: true } expedition2Window) {
+                var windowRect = expedition2Window.GetClientRectCache;
+                var bookRect = expedition2Window.GetChildFromIndices(3)?.GetClientRectCache;
+                var bounds = (bookRect?.Width > 0) ? bookRect.Value : windowRect;
 
+                if (!IsDrawableRect(windowRect)) return; 
 
+                var options = expedition2Window.Options
+                    .Where(x => x is { IsValid: true, IsVisible: true, IsVisibleLocal: true, Recipe: not null })
+                    .Select(x => (x, GetPriceOrDefault(x.Recipe)))
+                    .OrderByDescending(x => x.Item2.Value)
+                    .ToList();
+                var first = true;
+                foreach (var (option, recipePrice) in options) {
+                    var optionRect = option.GetClientRectCache;
+                    if (!IsDrawableRect(optionRect) ||
+                        !bounds.Intersects(optionRect) ||
+                        !bounds.Contains(optionRect.TopLeft)) {
+                        continue;
+                    }
+
+                    var coloredText = new ColoredText();
+
+                    coloredText.Add($"{GetValueText(recipePrice, 5, false)}", recipePrice.Color);
+                    var position = ClampTextPosition(optionRect.TopRight, coloredText.Size, bounds);
+                    coloredText.Draw(Graphics, position, _inGame_ColoredTextOptions);
+                    first = false;
+                }
+            }
             }
         }
 
+    }
+    private void DrawUnclaimedRemnantRewrd(Entity entity) {
+        if (Settings.DisplayUnclaimedRewardRemnants) {
+            var coloredText = new ColoredText();
+            coloredText.Add("Unclaimed Remnant Reward!!", Settings.LabelText_Color);
+            coloredText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), _minimap_ColoredTextOptions);
+        }
+    }
+
+    private void DrawRemnantOnMinimap(Entity entity, Expedition2EncounterData remnantData, RecipePrice recipePrice, bool remnantRerolled) {
+        //var expedition2RunesWeights = GameController.Files.Expedition2RunesWeights.EntriesList;
+        var remnantTransferRunePositions = remnantData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? [];
+
+        var selectedRecipee = remnantData?.SelectedRecipe;
+        bool HasSelectedRecipee = selectedRecipee?.Runes != null && selectedRecipee?.Runes.Count > 2;
+
+        var coloredMinimapText = new ColoredText();
+        var defaultColor = Settings.LabelText_Color;
+
+        coloredMinimapText.Add($"{(remnantRerolled ? "*" : "")}Rune[{remnantData.RuneCount}]:", defaultColor);
+
+        if (HasSelectedRecipee) {
+            var selectedRecipeePrice = GetPriceOrDefault(selectedRecipee);
+            coloredMinimapText.Add($"{GetValueText(selectedRecipeePrice)}", selectedRecipeePrice.Color);
+        }
+        else {
+            coloredMinimapText.Add($"{GetValueText(recipePrice)}", recipePrice.Color);
+        }
+
+        if (Settings.MinimapRemnant_ShowTransferred && HasSelectedRecipee && remnantTransferRunePositions.Count > 0) {
+            var transferredRunes = remnantTransferRunePositions
+                .Select(pos => selectedRecipee.Runes.ElementAtOrDefault(pos))
+                .Where(x => x != null)
+                .OrderBy(x => x.Id)
+                .ToList();
+
+            if (transferredRunes.Count > 0) coloredMinimapText.Add(" [T]:", defaultColor);
+
+            for (int i = 0; i < transferredRunes.Count; i++) {
+                var rune = transferredRunes[i];
+
+                if (i > 0) coloredMinimapText.Add(", ", defaultColor);
+
+                coloredMinimapText.Add(rune.Id, GetRuneColor(rune.Id));
+            }
+        }
+        coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), remnantRerolled ? _minimapRerolled_ColoredTextOptions : _minimap_ColoredTextOptions);
 
 
     }
+
 
     //--| Remnants |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     private static SColor PurpleRuneColor = SColor.FromArgb(230, 105, 251);
@@ -373,33 +446,22 @@ public class Plugin : BaseSettingsPlugin<Settings> {
     private SColor GetRuneColor(string runeId) {
         return _runeColors.TryGetValue(runeId, out var color) ? color : Settings.LabelText_Color;
     }
-    private ColoredText GetMapColoredText(RecipePrice recipePrice, IReadOnlyCollection<Expedition2Recipe> recipes, Expedition2EncounterData data, bool rerolled) {
-        var coloredText = new ColoredText();
-        var defaultColor = Settings.LabelText_Color;
+    private string GetValueText(RecipePrice recipePrice, int padding = 0, bool padLeft = true) {
+        var value = recipePrice.Value;
+        var useDivines = Settings.ShowValueInDivines && _divineValue > 0;
 
-        coloredText.Add($"{(rerolled ? "*" : "")}Rune[{data.RuneCount}]:", defaultColor);
-        coloredText.Add($"{(recipePrice.Overridden ? "~" : "")}{recipePrice.Value:F0}", recipePrice.Color);
+        if (useDivines) value /= _divineValue;
 
-        if (Settings.MinimapRemnant_ShowTransferred && data?.SelectedRecipe?.Runes != null && data?.PassedOnRunePositions is { Count: > 0 } positions) {
+        var format = recipePrice.Overridden
+            ? (useDivines ? "~F2" : "~F0")
+            : (useDivines ? "F2" : "F0");
 
-            var transferredRunes = positions
-                .Select(pos => data.SelectedRecipe.Runes.ElementAtOrDefault(pos))
-                .Where(x => x != null)
-                .OrderBy(x => x.Id)
-                .ToList();
+        var text = value.ToString(format);
 
-            if (transferredRunes.Count > 0) coloredText.Add(" [T]:", defaultColor);
+        if (useDivines && text.StartsWith("0."))
+            text = text.Substring(1);
 
-            for (int i = 0; i < transferredRunes.Count; i++) {
-                var rune = transferredRunes[i];
-
-                if (i > 0) coloredText.Add(", ", defaultColor);
-
-                coloredText.Add(rune.Id, GetRuneColor(rune.Id));
-            }
-        }
-
-        return coloredText;
+        return padLeft ? text.PadLeft(padding) : text.PadRight(padding);
     }
     
     private List<(Expedition2Recipe recipe, RecipePrice recipePrice)> GetRemanantRecipes(List<Expedition2RunesWeight> expedition2RunesWeights, int areaLevel, ILookup<int, Expedition2Recipe> allRecipes, Expedition2EncounterData data) {

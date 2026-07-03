@@ -30,6 +30,8 @@ public sealed class UserInterface : PluginModule {
 
         ImGui.Text("* = Rune Rerolled");
 
+        DXT.Checkbox.Draw("Show Values in Divine Orbs", ref Settings.ShowValueInDivines);
+
         DXT.Checkbox.Draw("Show Remnants with Unclaimed Rewards", ref Settings.DisplayUnclaimedRewardRemnants);
 
         //DXT.Checkbox.Draw("Show Completed Remnants", ref Settings.DisplayCompletedRemnants);

@@ -20,12 +20,12 @@ public static partial class DXT {
         public override int GetHashCode() => HashCode.Combine(Text, Color);
     }
     public record ColoredTextOptions {
-        public SColor DefaultColor { get; init; } = SColor.White;
-        public SColor BgColor { get; init; } = SColor.Transparent;
-        public SColor BorderColor { get; init; } = SColor.Transparent; 
-        public DXTPadding Padding { get; init; } = new DXTPadding(1);
-        public int Rounding { get; init; } = 0;
-        public int BorderThickness { get; init; } = 1; 
+        public SColor DefaultColor { get; set; } = SColor.White;
+        public SColor BgColor { get; set; } = SColor.Transparent;
+        public SColor BorderColor { get; set; } = SColor.Transparent; 
+        public DXTPadding Padding { get; set; } = new DXTPadding(1);
+        public int Rounding { get; set; } = 0;
+        public int BorderThickness { get; set; } = 1; 
 
         public static readonly ColoredTextOptions Default = new();
     }
