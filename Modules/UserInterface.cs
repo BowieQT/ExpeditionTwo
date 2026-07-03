@@ -34,7 +34,7 @@ public sealed class UserInterface : PluginModule {
 
         DXT.Checkbox.Draw("Show Remnants with Unclaimed Rewards", ref Settings.DisplayUnclaimedRewardRemnants);
 
-        //DXT.Checkbox.Draw("Show Completed Remnants", ref Settings.DisplayCompletedRemnants);
+        DXT.Checkbox.Draw("Show Completed Remnants", ref Settings.DisplayCompletedRemnants);
 
         ImGui.Spacing(); ImGui.Separator(); ImGui.Spacing();
 

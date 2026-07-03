@@ -45,6 +45,15 @@ public class RecipePrice {
     }
 
 }
+public class RemnantStatus {
+    public bool IsUnclaimedReward { get; set; } = false;
+    public bool IsCompleted { get; set; } = false;
+    public bool IsNotTagged { get; set; } = false;
+    public bool IsRerolled { get; set; } = false;
+    public bool IsHovered { get; set; } = false;
+    public bool IsActive { get; set; } = false;
+    public int RuneCount { get; set; } = 0;
+}
 
 public class Plugin : BaseSettingsPlugin<Settings> {
 
@@ -140,6 +149,35 @@ public class Plugin : BaseSettingsPlugin<Settings> {
     private ColoredTextOptions _minimapRerolled_ColoredTextOptions = new ColoredTextOptions { Padding = new DXTPadding(2, 2, 2, 4) };
     private ColoredTextOptions _minimapHighlighted_ColoredTextOptions = new ColoredTextOptions { Padding = new DXTPadding(4, 4, 4, 6), BorderThickness = 2 };
 
+    private RemnantStatus GetRemnantStatus (Entity entity) {
+        var status = new RemnantStatus();
+        var states = entity?.GetComponent<StateMachine>()?.States;
+        if (states == null) return status;
+
+        foreach (var s in states) {
+            switch (s.Name) {
+                case "activated":
+                    int val = (int)s.Value;
+                    if (val == 3) status.IsActive = true;
+                    else if(val == 6) status.IsUnclaimedReward = true;
+                    else if (val == 7) status.IsCompleted = true;
+                    else if (val == 8) status.IsNotTagged = true;
+                    break;
+                case "is_rerolled":
+                    if ((int)s.Value == 1) status.IsRerolled = true;
+                    break;
+                case "in_placing_range":
+                    if ((int)s.Value == 1) status.IsHovered = true;
+                    break;
+            }
+        }
+        var socketState = states.FirstOrDefault(x => x.Name == "sockets");
+        if (socketState != null) {
+            status.RuneCount = (int)socketState.Value;
+        }
+
+        return status;
+    }
     public override void Render() {
         DBug.Render();
 
@@ -165,21 +203,16 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                  
                 foreach (var remnant in remnants) {
                     var entity = remnant.LabelOnGround.ItemOnGround;
-                    var states = entity?.GetComponent<StateMachine>()?.States;
                     if (entity == null) continue;
 
                     entities.Remove(entity);
-                    // 7? = Remnant not exploded  
-                    var remnantUnclaimedReward = states != null && states.Any(s => s.Name == "activated" && ((int)s.Value == 6));
-                    var remnantComplete = states != null && states.Any(s => s.Name == "activated" && ((int)s.Value == 8));
-                    var remnantRerolled = states != null && states.Any(s => s.Name == "is_rerolled" && ((int)s.Value == 1));
-                    var remnantHovered = states != null && states.Any(s => s.Name == "in_placing_range" && ((int)s.Value == 1));
 
-
-                    if (remnantComplete) {
+                    var remnantStatus = GetRemnantStatus(entity);
+                    if (remnantStatus.IsNotTagged) continue;
+                    if (remnantStatus.IsCompleted) {
                         if (!Settings.DisplayCompletedRemnants) continue;
                     }
-                    else if (remnantUnclaimedReward) {
+                    else if (remnantStatus.IsUnclaimedReward) {
                         DrawUnclaimedRemnantRewrd(entity);
                         continue;
                     }
@@ -202,19 +235,19 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                     var first = true;
                     // Hover
 
-                    if (remnantHovered) Graphics.DrawFrame(remnantRect, Settings.ExplosiveHover_Color, 0, 5, 0);
+                    if (remnantStatus.IsHovered) Graphics.DrawFrame(remnantRect, Settings.ExplosiveHover_Color, 0, 5, 0);
 
                     foreach (var (recipe, recipePrice) in remnantRecipes) {
                         // Minimap Display
                         if (first && Settings.MinimapRemnant_Show) {
-                            DrawRemnantOnMinimap(entity, remnantRuneData, recipePrice, remnantRerolled, remnantHovered);
+                            DrawRemnantOnMinimap(entity, remnantRuneData, recipePrice, remnantStatus);
                         }
                         // Ingame Display
-                        if (!remnantRerolled || first) { 
+                        if (!remnantStatus.IsRerolled || first) { 
                             var coloredText = new ColoredText();
                             var displayValue = recipePrice.Value.ToString(recipePrice.Overridden ? "~F0" : "F0");
 
-                            coloredText.Add(GetValueText(recipePrice, remnantRerolled ? 0 : 7), recipePrice.Color);
+                            coloredText.Add(GetValueText(recipePrice, remnantStatus.IsRerolled ? 0 : 7), recipePrice.Color);
                             coloredText.Add($" {(string.IsNullOrWhiteSpace(recipe.Description) ? recipe.Reward?.BaseName : recipe.Description)}", recipePrice.Color);
                             coloredText.Add($"  x{recipe.RewardCount}", recipePrice.Color);
                             var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, _inGame_ColoredTextOptions);
@@ -227,7 +260,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                     // Ingame Transferred Rune Text
                     y += 2;
                     if (Settings.InGameRemnant_ShowTransferred && remnantTransferRunePositions.Count > 0) {
-                        if (!remnantRerolled) {
+                        if (!remnantStatus.IsRerolled) {
                             foreach (var position in remnantTransferRunePositions) {
                                 var runes = remnantRecipes
                                     .Select(item => item.recipe.Runes.ElementAtOrDefault(position)) 
@@ -260,7 +293,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                                 .OrderBy(x => x.Id)
                                 .ToList();
 
-                            if (transferredRunes.Count > 0) coloredText.Add($"{(remnantRerolled ? "Locked" : "Selected")} Rune Transfers: ", Settings.LabelText_Color);
+                            if (transferredRunes.Count > 0) coloredText.Add($"{(remnantStatus.IsRerolled ? "Locked" : "Selected")} Rune Transfers: ", Settings.LabelText_Color);
 
                             for (int i = 0; i < transferredRunes.Count; i++) {
                                 var rune = transferredRunes[i];
@@ -278,19 +311,14 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                 // remnants without label on ground
                 if (Settings.MinimapRemnant_Show) {
                     foreach (var entity in entities) {
-                        var states = entity?.GetComponent<StateMachine>()?.States;
                         if (entity == null) continue;
 
-                        var remnantUnclaimedReward = states != null && states.Any(s => s.Name == "activated" && ((int)s.Value == 6));
-                        var remnantComplete = states != null && states.Any(s => s.Name == "activated" && ((int)s.Value == 8));
-                        var remnantRerolled = states != null && states.Any(s => s.Name == "is_rerolled" && ((int)s.Value == 1));
-                        var remnantHovered = states != null && states.Any(s => s.Name == "in_placing_range" && ((int)s.Value == 1));
-                        var runeCount = states?.FirstOrDefault(x => x.Name == "sockets")?.Value;
-
-                        if (remnantComplete) {
+                        var remnantStatus = GetRemnantStatus(entity);
+                        if (remnantStatus.IsNotTagged) continue;
+                        if (remnantStatus.IsCompleted) {
                             if (!Settings.DisplayCompletedRemnants) continue;
                         }
-                        else if (remnantUnclaimedReward) {
+                        else if (remnantStatus.IsUnclaimedReward) {
                             DrawUnclaimedRemnantRewrd(entity);
                             continue;
                         }
@@ -302,12 +330,12 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                             var remnantRecipes = GetRemanantRecipes(expedition2RunesWeights, areaLevel, allRecipes, remnantRuneData);
                             var firstRemnantrecipe = remnantRecipes.FirstOrDefault();
                             if (firstRemnantrecipe != default) {
-                                DrawRemnantOnMinimap(entity, remnantRuneData, firstRemnantrecipe.recipePrice, remnantRerolled, remnantHovered);
+                                DrawRemnantOnMinimap(entity, remnantRuneData, firstRemnantrecipe.recipePrice, remnantStatus);
                                 found = true;
                             }
                             if (!found) {
-                                if (runeCount != null) {
-                                    Graphics.DrawTextWithBackground($"Unknown rune {runeCount} sockets", Graphics.GridToMap(entity.GridPos, entity.GridPos), Color.Black);
+                                if (remnantStatus.RuneCount > 0) {
+                                    Graphics.DrawTextWithBackground($"Unknown rune {remnantStatus.RuneCount} sockets", Graphics.GridToMap(entity.GridPos, entity.GridPos), Color.Black);
                                 }
                             }
                         }
@@ -351,12 +379,12 @@ public class Plugin : BaseSettingsPlugin<Settings> {
     private void DrawUnclaimedRemnantRewrd(Entity entity) {
         if (Settings.DisplayUnclaimedRewardRemnants) {
             var coloredText = new ColoredText();
-            coloredText.Add("Unclaimed Remnant Reward!!", Settings.LabelText_Color);
+            coloredText.Add("Unclaimed Reward!!", Settings.LabelText_Color);
             coloredText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), _minimap_ColoredTextOptions);
         }
     }
 
-    private void DrawRemnantOnMinimap(Entity entity, Expedition2EncounterData remnantData, RecipePrice recipePrice, bool remnantRerolled, bool remanantHighlighted) {
+    private void DrawRemnantOnMinimap(Entity entity, Expedition2EncounterData remnantData, RecipePrice recipePrice, RemnantStatus remnantStatus) {
         //var expedition2RunesWeights = GameController.Files.Expedition2RunesWeights.EntriesList;
         var remnantTransferRunePositions = remnantData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? [];
 
@@ -366,7 +394,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
         var coloredMinimapText = new ColoredText();
         var defaultColor = Settings.LabelText_Color;
 
-        coloredMinimapText.Add($"{(remnantRerolled ? "*" : "")}Rune[{remnantData.RuneCount}]:", defaultColor);
+        coloredMinimapText.Add($"{(remnantStatus.IsRerolled ? "*" : "")}Rune[{remnantData.RuneCount}]:", defaultColor);
 
         if (HasSelectedRecipee) {
             var selectedRecipeePrice = GetPriceOrDefault(selectedRecipee);
@@ -393,7 +421,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                 coloredMinimapText.Add(rune.Id, GetRuneColor(rune.Id));
             }
         }
-        coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), remanantHighlighted ? _minimapHighlighted_ColoredTextOptions : remnantRerolled ? _minimapRerolled_ColoredTextOptions : _minimap_ColoredTextOptions);
+        coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), remnantStatus.IsHovered ? _minimapHighlighted_ColoredTextOptions : remnantStatus.IsRerolled ? _minimapRerolled_ColoredTextOptions : _minimap_ColoredTextOptions);
 
 
     }
