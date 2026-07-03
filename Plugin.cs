@@ -136,8 +136,9 @@ public class Plugin : BaseSettingsPlugin<Settings> {
     }
     //--| Render |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     private ColoredTextOptions _inGame_ColoredTextOptions = new ColoredTextOptions { };
-    private ColoredTextOptions _minimap_ColoredTextOptions = new ColoredTextOptions { };
-    private ColoredTextOptions _minimapRerolled_ColoredTextOptions = new ColoredTextOptions { Padding = new DXTPadding(2) };
+    private ColoredTextOptions _minimap_ColoredTextOptions = new ColoredTextOptions { Padding = new DXTPadding (1, 1, 1, 3) };
+    private ColoredTextOptions _minimapRerolled_ColoredTextOptions = new ColoredTextOptions { Padding = new DXTPadding(2, 2, 2, 4) };
+    private ColoredTextOptions _minimapHighlighted_ColoredTextOptions = new ColoredTextOptions { Padding = new DXTPadding(4, 4, 4, 6), BorderThickness = 2 };
 
     public override void Render() {
         DBug.Render();
@@ -157,6 +158,9 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                 _minimap_ColoredTextOptions.BgColor = Settings.BG_Color;
                 _minimapRerolled_ColoredTextOptions.BgColor = Settings.BG_Color;
                 _minimapRerolled_ColoredTextOptions.BorderColor = Settings.RerolledBorder_Color;
+                _minimapHighlighted_ColoredTextOptions.BgColor = Settings.BG_Color;
+                _minimapHighlighted_ColoredTextOptions.BorderColor = Settings.ExplosiveHover_Color;
+
                 _inGame_ColoredTextOptions.BgColor = Settings.BG_Color;
                  
                 foreach (var remnant in remnants) {
@@ -203,7 +207,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                     foreach (var (recipe, recipePrice) in remnantRecipes) {
                         // Minimap Display
                         if (first && Settings.MinimapRemnant_Show) {
-                            DrawRemnantOnMinimap(entity, remnantRuneData, recipePrice, remnantRerolled);
+                            DrawRemnantOnMinimap(entity, remnantRuneData, recipePrice, remnantRerolled, remnantHovered);
                         }
                         // Ingame Display
                         if (!remnantRerolled || first) { 
@@ -298,7 +302,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                             var remnantRecipes = GetRemanantRecipes(expedition2RunesWeights, areaLevel, allRecipes, remnantRuneData);
                             var firstRemnantrecipe = remnantRecipes.FirstOrDefault();
                             if (firstRemnantrecipe != default) {
-                                DrawRemnantOnMinimap(entity, remnantRuneData, firstRemnantrecipe.recipePrice, remnantRerolled);
+                                DrawRemnantOnMinimap(entity, remnantRuneData, firstRemnantrecipe.recipePrice, remnantRerolled, remnantHovered);
                                 found = true;
                             }
                             if (!found) {
@@ -352,7 +356,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
         }
     }
 
-    private void DrawRemnantOnMinimap(Entity entity, Expedition2EncounterData remnantData, RecipePrice recipePrice, bool remnantRerolled) {
+    private void DrawRemnantOnMinimap(Entity entity, Expedition2EncounterData remnantData, RecipePrice recipePrice, bool remnantRerolled, bool remanantHighlighted) {
         //var expedition2RunesWeights = GameController.Files.Expedition2RunesWeights.EntriesList;
         var remnantTransferRunePositions = remnantData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? [];
 
@@ -389,7 +393,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                 coloredMinimapText.Add(rune.Id, GetRuneColor(rune.Id));
             }
         }
-        coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), remnantRerolled ? _minimapRerolled_ColoredTextOptions : _minimap_ColoredTextOptions);
+        coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), remanantHighlighted ? _minimapHighlighted_ColoredTextOptions : remnantRerolled ? _minimapRerolled_ColoredTextOptions : _minimap_ColoredTextOptions);
 
 
     }
