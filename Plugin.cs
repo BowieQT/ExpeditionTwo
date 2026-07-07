@@ -55,7 +55,7 @@ public class VerisiumRemnant {
         var status = new RemnantStatus();
         var states = Entity?.GetComponent<StateMachine>()?.States;
         if (states == null) return status;
-
+        var placed_epk = false;
         foreach (var s in states) {
             switch (s.Name) {
                 case "activated":
@@ -70,9 +70,13 @@ public class VerisiumRemnant {
                     if ((int)s.Value == 1) status.IsRerolled = true;
                     break;
                 case "in_placing_range":
-                    if ((int)s.Value == 1) status.IsHovered = true;
+                    if ((int)s.Value == 1) status.InPlacementRange = true;
+                    break;
+                case "placed_epk":
+                    if ((int)s.Value == 1) placed_epk = true;
                     break;
             }
+            if (placed_epk && !status.InPlacementRange) status.IsMarkedForDetonation = true;
         }
         var socketState = states.FirstOrDefault(x => x.Name == "sockets");
         if (socketState != null) {
@@ -83,25 +87,41 @@ public class VerisiumRemnant {
     }
 }
 
-public enum RelicTypes {
+public enum ExplodableTypes {
     Unknown,
     MonsterRarity,
+    CurrencyChest,
+    UniquesChest,
+    WeaponChest,
+    ArmorChest,
+    MagicChest,
 
+    EliteRemnant,
 }
-public class RelicDefinition {
-    public string Path { get; set; }
-    public RelicTypes Type { get; set; }
+public class ExplodableDefinition {
+    public string LabelPath { get; init; }
+    public string EntityPath { get; init; }
+    public string AOBPath { get; set; }
+    public ExplodableTypes Type { get; set; }
 }
-public class Relic {
-    public LabelOnGround LabelOnGround { get; }
+public class Explodable {
+    public bool HasLabel { get; } = false;
+    public LabelOnGround? LabelOnGround { get; }
     public Entity Entity { get; }
-    public RelicTypes Type { get; } = RelicTypes.Unknown;
+    public ExplodableTypes Type { get; } = ExplodableTypes.Unknown;
 
-    public Relic(LabelOnGround labelOnGround, Entity entity, RelicTypes type) {
+    public Explodable(LabelOnGround labelOnGround, Entity entity, ExplodableTypes type) {
+        HasLabel = true;
         LabelOnGround = labelOnGround;
         Entity = entity;
         Type = type;
     }
+    public Explodable(Entity entity, ExplodableTypes type) {
+        HasLabel = false;
+        Entity = entity;
+        Type = type;
+    }
+
 }
 public class RecipePrice {
     public bool Overridden { get; } = false;
@@ -135,7 +155,8 @@ public class RemnantStatus {
     public bool IsPending { get; set; } = false;    
     public bool IsNotTagged { get; set; } = false;
     public bool IsRerolled { get; set; } = false;
-    public bool IsHovered { get; set; } = false;
+    public bool InPlacementRange { get; set; } = false;
+    public bool IsMarkedForDetonation { get; set; } = false;
     public bool IsActive { get; set; } = false;
     public int RuneCount { get; set; } = 0;
 }
@@ -144,13 +165,21 @@ public class Plugin : BaseSettingsPlugin<Settings> {
 
     private readonly TimeCache<List<VerisiumRemnant>> _verisiumRemnants;
     private readonly TimeCache<Dictionary<Expedition2Recipe, RecipePrice>> _recipePrices;
-    private readonly TimeCache<List<Relic>> _relics;
-    private readonly List<RelicDefinition> _relicDefinitions = new() {
-        new() { Path = "Metadata/Terrain/Gallows/Leagues/Expedition/Logbook_Peninsula/Objects/GoblinRelic", Type = RelicTypes.MonsterRarity },
-        new() { Path = "Metadata/Terrain/Gallows/Leagues/Expedition/Logbook_Wastes/Objects/Sulphite", Type = RelicTypes.MonsterRarity },
-        //new() { Path = "Metadata/Path/To/Another", Type = RelicTypes.SomeOtherType }
+    private readonly TimeCache<List<Explodable>> _explodables;
+    private readonly Dictionary<string, ExplodableDefinition> _labelLookups = new() {
+        { "Metadata/Terrain/Gallows/Leagues/Expedition/Logbook_Peninsula/Objects/GoblinRelic", new() { Type = ExplodableTypes.MonsterRarity } },
+        { "Metadata/Terrain/Gallows/Leagues/Expedition/Logbook_Wastes/Objects/Sulphite", new() { Type = ExplodableTypes.MonsterRarity } }
     };
-
+    private readonly Dictionary<string, List<ExplodableDefinition>> _entityLookups = new() {
+        { "Metadata/MiscellaneousObjects/Expedition/ExpeditionMarker", new List<ExplodableDefinition> {
+            new() { AOBPath = "Metadata/Terrain/Doodads/Leagues/Expedition/ChestMarkers/ChestCurrency.ao", Type = ExplodableTypes.CurrencyChest },
+            new() { AOBPath = "Metadata/Terrain/Doodads/Leagues/Expedition/chestmarker2.ao", Type = ExplodableTypes.MagicChest },
+            new() { AOBPath = "Metadata/Terrain/Doodads/Leagues/Expedition/ChestUniques.ao", Type = ExplodableTypes.UniquesChest },
+            new() { AOBPath = "Metadata/Terrain/Doodads/Leagues/Expedition/elitemarker", Type = ExplodableTypes.EliteRemnant },
+            new() { AOBPath = "Metadata/Terrain/Doodads/Leagues/Expedition/ChestMarkers/ChestWeapon.ao", Type = ExplodableTypes.WeaponChest },
+            new() { AOBPath = "Metadata/Terrain/Doodads/Leagues/Expedition/ChestMarkers/ChestArmor.ao", Type = ExplodableTypes.ArmorChest }
+        }}
+    };
     private BaseItemType _divineOrb;
     private BaseItemType DivineOrb {
         get {
@@ -166,16 +195,32 @@ public class Plugin : BaseSettingsPlugin<Settings> {
 
     //--| Initialise / construct |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     public Plugin() {
-        _relics = new TimeCache<List<Relic>>(() => GameController.IngameState.IngameUi.ItemsOnGroundLabelsVisible
-            .Where(label => label?.ItemOnGround?.Path != null)
-            .Select(label => {
-                var def = _relicDefinitions.FirstOrDefault(d => label.ItemOnGround.Path.StartsWith(d.Path, StringComparison.Ordinal));
-                return new { label, def };
-            })
-            .Where(x => x.def != null) // Filter out the ones that didn't match
-            .Select(x => new Relic(x.label, x.label.ItemOnGround, x.def!.Type))
-            .ToList(),
-        1000);
+        _explodables = new TimeCache<List<Explodable>>(() => {
+            var results = new List<Explodable>();
+
+            foreach (var label in GameController.IngameState.IngameUi.ItemsOnGroundLabelsVisible) {
+                var path = label?.ItemOnGround?.Path;
+                if (path == null) continue;
+                if (_labelLookups.TryGetValue(path, out var def)) {
+                    results.Add(new Explodable(label, label.ItemOnGround, def.Type));
+                }
+            }
+            foreach (var entity in GameController.Entities) {
+                if (string.IsNullOrEmpty(entity?.Path)) continue;
+
+                if (_entityLookups.TryGetValue(entity.Path, out var defList)) {
+                    foreach (var def in defList) {
+                        if (!string.IsNullOrEmpty(def.AOBPath)) {
+                            if (!entity.TryGetComponent<Animated>(out var animated)) continue;
+                            if (animated.BaseAnimatedObjectEntity?.Path?.StartsWith(def.AOBPath, StringComparison.Ordinal) != true) continue;
+                        }
+                        results.Add(new Explodable(entity, def.Type));
+                        break;
+                    }
+                }
+            }
+            return results;
+        }, 1000);
         _verisiumRemnants = new TimeCache<List<VerisiumRemnant>>(() => {
             var labelsOnGround = GameController.IngameState.IngameUi.ItemsOnGroundLabelsVisible
                 .Where(x => x?.ItemOnGround?.Metadata?.StartsWith("Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter", StringComparison.Ordinal) == true)
@@ -275,24 +320,36 @@ public class Plugin : BaseSettingsPlugin<Settings> {
         DBug.Render();
 
         RenderRemnants();
-        RenderRelics();
+        RenderExplodables();
     }
-    //--| Relic |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    private void RenderRelics() {
-        foreach (var relic in _relics.Value) {
-            if (relic == null) continue;
+    //--| Explodables |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    private void RenderExplodables() {
+        foreach (var explodable in _explodables.Value) {
+            if (explodable == null) continue;
 
-            var states = relic.Entity?.GetComponent<StateMachine>()?.States;
-            var isHovered = states?.Any(s => s.Name == "in_placing_range" && (int)s.Value == 1) ?? false;
+            var states = explodable.Entity?.GetComponent<StateMachine>()?.States;
 
-            if (isHovered) {
-                var labelRect = relic.LabelOnGround.Label.GetClientRect();
-                Graphics.DrawFrame(labelRect, Settings.ExplosiveHover_Color, 0, 5, 0);
+            var inPlacementRange = states?.Any(s => s.Name == "in_placing_range" && (int)s.Value == 1) ?? false;
+            var placed_epk = states?.Any(s => s.Name == "placed_epk" && (int)s.Value == 1) ?? false;
+            var markedForExplosion = !inPlacementRange && placed_epk;
+
+            if (inPlacementRange || markedForExplosion) {
+                var color = inPlacementRange ? Settings.InPlacementRange_Color : Settings.MarkedForExplosion_Color;
+                if (explodable.HasLabel) {
+                    var labelRect = explodable.LabelOnGround.Label.GetClientRect();
+                    Graphics.DrawFrame(labelRect, color, 0, 5, 0);
+                }
+
+                var rawPos = Graphics.GridToMap(explodable.Entity.GridPos, explodable.Entity.GridPos);
+                var mapPos = new Vector2((int)rawPos.X, (int)rawPos.Y);
+
+                Graphics.DrawCircle(mapPos, 12, SColor.Black, 4, 16);
+                Graphics.DrawCircle(mapPos, 12, color, 2, 16);
             }
         }
         //GameController.InspectObject(_relics, "_relics");
     }
-    //--| Remnants |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //--| Remnants |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     private void DrawRemnantOnMinimap( VerisiumRemnant verisiumRemnant, RecipePrice bestRecipePrice ) {
         var remnantTransferRunePositions = verisiumRemnant.RuneData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? [];
         var selectedRecipe = verisiumRemnant.RuneData?.SelectedRecipe;
@@ -327,19 +384,27 @@ public class Plugin : BaseSettingsPlugin<Settings> {
                 coloredText.Add(rune.Id, GetRuneColor(rune.Id));
             }
         }
+
         var gridCenter = Graphics.GridToMap(verisiumRemnant.Entity.GridPos, verisiumRemnant.Entity.GridPos);
         var centeredPos = new SVector2(
-            gridCenter.X - (coloredText.Size.X / 2),
-            gridCenter.Y - (coloredText.Size.Y / 2)
+            MathF.Round(gridCenter.X - (coloredText.Size.X / 2)),
+            MathF.Round(gridCenter.Y - (coloredText.Size.Y / 2))
         );
+
         var padding = new DXTPadding(0, 0, 2, 3);
+        var borderInset = new DXTPadding(1);
         var coloredTextOptions = new ColoredTextOptions { BgColor = Settings.BG_Color, Padding = padding };
-        if (verisiumRemnant.Status.IsHovered) {
+        if (verisiumRemnant.Status.InPlacementRange) {
             coloredTextOptions.Padding = padding.Expand(2,2);
             coloredTextOptions.BorderThickness = 2;
-            coloredTextOptions.BorderColor = Settings.ExplosiveHover_Color;
+            coloredTextOptions.BorderColor = Settings.InPlacementRange_Color;
         }
-        else if(verisiumRemnant.Status.IsRerolled) {
+        else if (verisiumRemnant.Status.IsMarkedForDetonation) {
+            coloredTextOptions.Padding = padding.Expand(2, 2);
+            coloredTextOptions.BorderThickness = 2;
+            coloredTextOptions.BorderColor = Settings.MarkedForExplosion_Color;
+        }
+        else if (verisiumRemnant.Status.IsRerolled) {
             coloredTextOptions.Padding = padding.Expand(2, 2);
             coloredTextOptions.BorderThickness = 2;
             coloredTextOptions.BorderColor = Settings.RerolledBorder_Color;
@@ -367,8 +432,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
             coloredText.Draw(centeredPos, coloredTextOptions);
         }
     }
-
-    private void DrawRemnant(VerisiumRemnant verisiumRemnant, List<(Expedition2Recipe, RecipePrice)> remnantRecipes) {
+    private void DrawRemnantInGame(VerisiumRemnant verisiumRemnant, List<(Expedition2Recipe, RecipePrice)> remnantRecipes) {
         if (verisiumRemnant.Expedition2EncounterLabel == null) return;
 
         var coloredTextOptions = new ColoredTextOptions { BgColor = Settings.BG_Color, Padding = new DXTPadding(0, 0, 2, 3) };
@@ -377,7 +441,8 @@ public class Plugin : BaseSettingsPlugin<Settings> {
         labelStartPos += new Vector2(Settings.InGameRemnant_RenderOffset.X, Settings.InGameRemnant_RenderOffset.Y);
         var currentY = labelStartPos.Y;
 
-        if (verisiumRemnant.Status.IsHovered) Graphics.DrawFrame(remnantRect, Settings.ExplosiveHover_Color, 0, 5, 0);
+        if (verisiumRemnant.Status.InPlacementRange) Graphics.DrawFrame(remnantRect, Settings.InPlacementRange_Color, 0, 5, 0);
+        if (verisiumRemnant.Status.IsMarkedForDetonation) Graphics.DrawFrame(remnantRect, Settings.MarkedForExplosion_Color, 0, 5, 0);
 
         // Draw recipe list
         var shownRemnantRecipes = remnantRecipes.Take(Settings.InGameRemnant_MaxItemsToShow).ToList();
@@ -485,7 +550,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
 
                 if (Settings.MinimapRemnant_Show) DrawRemnantOnMinimap(verisiumRemnant, bestRecipeePrice);
 
-                if (Settings.InGameRemnant_Show) DrawRemnant(verisiumRemnant, remnantRecipes);
+                if (Settings.InGameRemnant_Show) DrawRemnantInGame(verisiumRemnant, remnantRecipes);
             }
 
         }

@@ -48,8 +48,9 @@ public sealed class Settings : ISettings {
 
     public SColor BG_Color = SColor.FromArgb(200, 0, 0, 0);
 
-    public SColor ExplosiveHover_Color = SColor.FromArgb(200, 0, 0);
-    public SColor RerolledBorder_Color = SColor.FromArgb(255, 82, 82);
+    public SColor InPlacementRange_Color = SColor.FromArgb(100, 221, 23);
+    public SColor MarkedForExplosion_Color = SColor.FromArgb(0, 229, 255);
+    public SColor RerolledBorder_Color = SColor.FromArgb(244, 67, 54);
     public SColor SelectedBorder_Color = SColor.FromArgb(255, 255, 0);
 
 

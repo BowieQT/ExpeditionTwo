@@ -67,22 +67,25 @@ public sealed class UserInterface : PluginModule {
 
         ImGui.Spacing(); ImGui.Separator(); ImGui.Spacing();
 
-
         DXT.ColorSelect.Draw("BG_Color", "Label Background Color", ref Settings.BG_Color);
         ImGui.SameLine();
         ImGui.Text("Label Background Color");
 
-        DXT.ColorSelect.Draw("ExplosiveHover_Color", "Explosive Hover Border Color", ref Settings.ExplosiveHover_Color);
+        DXT.ColorSelect.Draw("InPlacementRange_Color", "In Placement Range Color", ref Settings.InPlacementRange_Color);
         ImGui.SameLine();
-        ImGui.Text("Explosive Hovered Border Color");
+        ImGui.Text("In Explosive Placement Range Color");
+
+        DXT.ColorSelect.Draw("MarkedForExplosion_Color", "Marked Range Color", ref Settings.MarkedForExplosion_Color);
+        ImGui.SameLine();
+        ImGui.Text("Marked For Explosion Color (only visibile when explosive placement active)");
 
         DXT.ColorSelect.Draw("RerolledBorder_Color", "Rerolled Border Border", ref Settings.RerolledBorder_Color);
         ImGui.SameLine();
-        ImGui.Text("Rerolled Border Color");
+        ImGui.Text("Rerolled Color");
 
         DXT.ColorSelect.Draw("SelectedBorder_Color", "Selected Recipe Border Border", ref Settings.SelectedBorder_Color);
         ImGui.SameLine();
-        ImGui.Text("Selected Recipe Border Color");
+        ImGui.Text("Has Selected Recipe Color");
 
         DXT.ColorSelect.Draw("LabelText_Color", "Label Color", ref Settings.LabelText_Color);
         ImGui.SameLine();

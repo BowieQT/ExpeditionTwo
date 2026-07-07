@@ -95,24 +95,28 @@ public static partial class DXT {
             SVector2 size = new(width + options.Padding.Left + options.Padding.Right,
                                 height + options.Padding.Top + options.Padding.Bottom);
 
-            if (options.BgColor.A > 0) {
-                SVector2 topLeft = new(pos.X - options.Padding.Left, pos.Y - options.Padding.Top);
-                SVector2 bottomRight = topLeft + size;
+            float rawX = pos.X - options.Padding.Left;
+            float rawY = pos.Y - options.Padding.Top;
+            SVector2 topLeft = new(MathF.Floor(rawX) + 0.5f, MathF.Floor(rawY) + 0.5f);
+            SVector2 sizeSnapped = new(MathF.Round(size.X), MathF.Round(size.Y));
+            SVector2 bottomRight = topLeft + sizeSnapped;
+
+            if(options.BgColor.A > 0) {
                 _graphics.DrawBox(topLeft, bottomRight, options.BgColor, options.Rounding);
             }
-
-            if (options.BorderColor.A > 0 && options.BorderThickness > 0) {
-                SVector2 topLeft = new(pos.X - options.Padding.Left, pos.Y - options.Padding.Top);
-                SVector2 bottomRight = topLeft + size;
+            if (options.BorderColor.A > 0 && options.BorderThickness > 0) {            
                 _graphics.DrawFrame(topLeft, bottomRight, options.BorderColor, options.Rounding, options.BorderThickness, 0);
             }
 
-            float x = pos.X;
+            float textX = topLeft.X + options.Padding.Left;
+            float textY = pos.Y;
+
             foreach (var seg in Segments) {
                 var color = seg.Color.IsEmpty ? options.DefaultColor : seg.Color;
-                _graphics.DrawText(seg.Text, new SVector2(x, pos.Y), color);
-                x += _graphics.MeasureText(seg.Text).X;
+                _graphics.DrawText(seg.Text, new SVector2(textX, textY), color);
+                textX += _graphics.MeasureText(seg.Text).X;
             }
+
             return size;
         }
 
