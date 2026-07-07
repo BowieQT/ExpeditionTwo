@@ -28,8 +28,6 @@ public sealed class UserInterface : PluginModule {
         //if (DXT.CollapsingHeader("Remnant Settings", ref Settings.RunesHeaderOpen)) {
         //ImGui.Indent();//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-        ImGui.Text("* = Rune Rerolled");
-
         //DXT.Checkbox.Draw("Show Values in Divine Orbs", ref Settings.ShowValueInDivines);
 
         DXT.Checkbox.Draw("Show Remnants with Unclaimed Rewards", ref Settings.DisplayUnclaimedRewardRemnants);
