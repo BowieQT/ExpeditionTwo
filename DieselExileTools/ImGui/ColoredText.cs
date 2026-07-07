@@ -33,63 +33,40 @@ public static partial class DXT {
     public class ColoredText
     {
         private readonly List<ColorSegment> _segments = new();
-        private float? _width;
-        private float? _height;
-        private SVector2? _size;
         public IReadOnlyList<ColorSegment> Segments => _segments;
+        private readonly Graphics _graphics;
 
         /// <summary>Gets the total width of the colored text in pixels (cached after first calculation).</summary>
-        public float Width {
-            get {
-                if (_width == null) {
-                    float w = 0;
-                    foreach (var seg in Segments)
-                        w += ImGui.CalcTextSize(seg.Text).X;
-                    _width = w;
-                }
-                return _width.Value;
-            }
-        }
-
+        public float Width => _segments.Sum(seg => _graphics.MeasureText(seg.Text).X);
         /// <summary>Gets the height of the colored text in pixels (cached after first calculation).</summary>
-        public float Height {
-            get {
-                _height ??= ImGui.CalcTextSize("A").Y;
-                return _height.Value;
-            }
-        }
+        public float Height => _graphics.MeasureText("A").Y;
 
         /// <summary>Gets the total size (width and height) of the colored text in pixels (cached after first calculation).</summary>
-        public SVector2 Size {
-            get {
-                if (_size == null)
-                    _size = new SVector2(Width, Height);
-                return _size.Value;
-            }
-        }
+        public SVector2 Size => new(Width, Height);
 
         /// <summary>Gets the number of color segments in this text.</summary>
         public int Count => Segments.Count;
 
         public void Add(string text, SColor color = default) {
             _segments.Add(new ColorSegment(text, color));
-            // Reset caches 
-            _width = null;
-            _height = null;
-            _size = null;
         }
 
-        public ColoredText() { }
+        public ColoredText(Graphics graphics) {
+            _graphics = graphics;
+        }
 
-        public ColoredText(string input) {
-            if (input is null) input = string.Empty;
-            var segments = ParseSegments(input);
+        // Pass the graphics instance to all constructors
+        public ColoredText(Graphics graphics, string input) : this(graphics) {
+            if (input != null) _segments.AddRange(ParseSegments(input));
+        }
+
+        public ColoredText(Graphics graphics, IEnumerable<ColorSegment> segments) : this(graphics) {
             _segments.AddRange(segments);
         }
 
-        public ColoredText(IEnumerable<ColorSegment> segments) => _segments.AddRange(segments);
-
-        public ColoredText(string input, SColor color) : this(new List<ColorSegment> { new(input ?? string.Empty, color) }) { }
+        public ColoredText(Graphics graphics, string input, SColor color) : this(graphics) {
+            _segments.Add(new ColorSegment(input ?? string.Empty, color));
+        }
 
         /// <summary>Returns the concatenated plain text (without color information).</summary>
         public string ToUncoloredString() {
@@ -108,12 +85,12 @@ public static partial class DXT {
         /// <param name="pos">The starting screen position.</param>
         /// <param name="options">Styling configuration; uses defaults if null.</param>
         /// <returns>The total size of the drawn element.</returns>
-        public SVector2 Draw(Graphics g, SVector2 pos, ColoredTextOptions options = null) {
+        public SVector2 Draw(SVector2 pos, ColoredTextOptions options = null) {
             options ??= ColoredTextOptions.Default;
 
             float width = 0;
-            foreach (var seg in Segments) width += g.MeasureText(seg.Text).X;
-            float height = g.MeasureText("A").Y;
+            foreach (var seg in Segments) width += _graphics.MeasureText(seg.Text).X;
+            float height = _graphics.MeasureText("A").Y;
 
             SVector2 size = new(width + options.Padding.Left + options.Padding.Right,
                                 height + options.Padding.Top + options.Padding.Bottom);
@@ -121,31 +98,22 @@ public static partial class DXT {
             if (options.BgColor.A > 0) {
                 SVector2 topLeft = new(pos.X - options.Padding.Left, pos.Y - options.Padding.Top);
                 SVector2 bottomRight = topLeft + size;
-                g.DrawBox(topLeft, bottomRight, options.BgColor, options.Rounding);
+                _graphics.DrawBox(topLeft, bottomRight, options.BgColor, options.Rounding);
             }
 
             if (options.BorderColor.A > 0 && options.BorderThickness > 0) {
                 SVector2 topLeft = new(pos.X - options.Padding.Left, pos.Y - options.Padding.Top);
                 SVector2 bottomRight = topLeft + size;
-                g.DrawFrame(topLeft, bottomRight, options.BorderColor, options.Rounding, options.BorderThickness, 0);
+                _graphics.DrawFrame(topLeft, bottomRight, options.BorderColor, options.Rounding, options.BorderThickness, 0);
             }
 
             float x = pos.X;
             foreach (var seg in Segments) {
                 var color = seg.Color.IsEmpty ? options.DefaultColor : seg.Color;
-                g.DrawText(seg.Text, new SVector2(x, pos.Y), color);
-                x += g.MeasureText(seg.Text).X;
+                _graphics.DrawText(seg.Text, new SVector2(x, pos.Y), color);
+                x += _graphics.MeasureText(seg.Text).X;
             }
             return size;
-        }
-
-        public SVector2 GetSize(Graphics g) {
-            float width = 0;
-            foreach (var seg in Segments) {
-                width += g.MeasureText(seg.Text).X;
-            }
-            // Assuming Height is a property already calculated in your class
-            return new SVector2(width, Height);
         }
 
         /// <summary>Returns a new instance truncated to fit within the specified width, appending an ellipsis if needed.</summary>
@@ -182,7 +150,7 @@ public static partial class DXT {
             // If no truncation was needed, return this
             if (result.Count == Segments.Count && result.SequenceEqual(Segments))
                 return this;
-            return new ColoredText(result);
+            return new ColoredText(_graphics, result);
         }
 
         // Private parser

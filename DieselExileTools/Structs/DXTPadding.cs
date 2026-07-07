@@ -27,6 +27,14 @@ public struct DXTPadding
     public readonly void Deconstruct(out int left, out int top, out int right, out int bottom) {
         left = Left; top = Top; right = Right; bottom = Bottom;
     }
+    public readonly DXTPadding Expand(int horizontal, int vertical) {
+        return new DXTPadding(
+            Left + horizontal, 
+            Top + vertical,
+            Right + horizontal,
+            Bottom + vertical
+        );
+    }
 
     public readonly Vector4 ToVector4() => new(Left, Top, Right, Bottom);
 

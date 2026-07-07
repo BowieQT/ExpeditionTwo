@@ -13,8 +13,11 @@ using ExileCore2.Shared.Enums;
 using ImGuiNET;
 using Newtonsoft.Json.Linq;
 using System.Numerics;
+using System.Xml.Linq;
 using static DieselExileTools.DXT;
+using static System.Net.Mime.MediaTypeNames;
 using static System.Runtime.InteropServices.JavaScript.JSType;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 using RectangleF = ExileCore2.Shared.RectangleF;
 using SColor = System.Drawing.Color;
 using SVector2 = System.Numerics.Vector2;
@@ -23,31 +26,113 @@ using SVector2 = System.Numerics.Vector2;
 namespace ExpeditionTwo;
 
 public class VerisiumRemnant {
-    public LabelOnGround LabelOnGround { get; }
-    public Expedition2EncounterLabel Expedition2EncounterLabel { get; }
 
-    public VerisiumRemnant(LabelOnGround labelOnGround, Expedition2EncounterLabel expedition2EncounterLabel) {
-        LabelOnGround = labelOnGround;
-        Expedition2EncounterLabel = expedition2EncounterLabel;
+    public bool HasLabel { get; } = false;
+    public Entity Entity { get; } 
+    public Expedition2EncounterLabel? Expedition2EncounterLabel { get; }
+    public Expedition2EncounterData? RuneData { get; }
+    public RemnantStatus Status { get; private set; }
+
+    public VerisiumRemnant(LabelOnGround labelOnGround) {
+        HasLabel = true;
+        Entity = labelOnGround.ItemOnGround;
+        Expedition2EncounterLabel = labelOnGround.Label.AsObject<Expedition2EncounterLabel>();
+        RuneData = Expedition2EncounterLabel?.Data;
+    }
+    public VerisiumRemnant(Entity entity) {
+        HasLabel = false;
+        Entity = entity;
+        if (entity?.HashComponents.GetValueOrDefault((ushort)0x87B2) is not 0 and { } dataAddr) 
+            RuneData = RemoteMemoryObject.GetObjectStatic<Expedition2EncounterData>(dataAddr);
+    }
+
+    public void Update() {
+        Status = GetStatus();
+
+    }
+    private RemnantStatus GetStatus() {
+
+        var status = new RemnantStatus();
+        var states = Entity?.GetComponent<StateMachine>()?.States;
+        if (states == null) return status;
+
+        foreach (var s in states) {
+            switch (s.Name) {
+                case "activated":
+                    int val = (int)s.Value;
+                    if (val == 3) status.IsPending = true; // Pending in Started Blast chain 
+                    else if (val == 5) status.IsActive = true; // ?? actively spawning monsters 
+                    else if (val == 6) status.IsUnclaimedReward = true;
+                    else if (val == 7) status.IsCompleted = true;
+                    else if (val == 8) status.IsNotTagged = true;
+                    break;
+                case "is_rerolled":
+                    if ((int)s.Value == 1) status.IsRerolled = true;
+                    break;
+                case "in_placing_range":
+                    if ((int)s.Value == 1) status.IsHovered = true;
+                    break;
+            }
+        }
+        var socketState = states.FirstOrDefault(x => x.Name == "sockets");
+        if (socketState != null) {
+            status.RuneCount = (int)socketState.Value;
+        }
+
+        return status;
     }
 }
 
+public enum RelicTypes {
+    Unknown,
+    MonsterRarity,
+
+}
+public class RelicDefinition {
+    public string Path { get; set; }
+    public RelicTypes Type { get; set; }
+}
+public class Relic {
+    public LabelOnGround LabelOnGround { get; }
+    public Entity Entity { get; }
+    public RelicTypes Type { get; } = RelicTypes.Unknown;
+
+    public Relic(LabelOnGround labelOnGround, Entity entity, RelicTypes type) {
+        LabelOnGround = labelOnGround;
+        Entity = entity;
+        Type = type;
+    }
+}
 public class RecipePrice {
-    public bool Overridden { get; }
-    public bool NinjaPriced { get; }
-    public double Value { get; }
-    public SColor Color { get; }
-    public RecipePrice(double value, bool overridden, bool ninjaPriced, SColor color) {
-        Value = value;
+    public bool Overridden { get; } = false;
+    public bool NinjaPriced { get; } = false;
+    public double PriceInExalts { get; } = 0;
+    public double PriceInDivines { get; } = 0;
+    public SColor Color { get; } = SColor.White;
+    public RecipePrice(double valueExalts, double divineValue, bool overridden, bool ninjaPriced, SColor color) {
+        PriceInExalts = valueExalts;
+        PriceInDivines = divineValue;
         Overridden = overridden;
         NinjaPriced = ninjaPriced;
         Color = color;
     }
+    public RecipePrice(SColor color) { Color = color; }
 
+    public string Format(int padding = 0, bool padLeft = true) {
+
+        var displayValue = PriceInDivines > 0 ? Math.Max(PriceInDivines, 0.01) : 0;
+        var text = displayValue == 0 ? "0?" : displayValue.ToString("#.##");
+
+        if (Overridden) text = "~" + text;
+
+        return padLeft ? text.PadLeft(padding) : text.PadRight(padding);
+
+    }
 }
 public class RemnantStatus {
     public bool IsUnclaimedReward { get; set; } = false;
     public bool IsCompleted { get; set; } = false;
+    public bool IsPending { get; set; } = false;    
     public bool IsNotTagged { get; set; } = false;
     public bool IsRerolled { get; set; } = false;
     public bool IsHovered { get; set; } = false;
@@ -59,55 +144,97 @@ public class Plugin : BaseSettingsPlugin<Settings> {
 
     private readonly TimeCache<List<VerisiumRemnant>> _verisiumRemnants;
     private readonly TimeCache<Dictionary<Expedition2Recipe, RecipePrice>> _recipePrices;
+    private readonly TimeCache<List<Relic>> _relics;
+    private readonly List<RelicDefinition> _relicDefinitions = new() {
+        new() { Path = "Metadata/Terrain/Gallows/Leagues/Expedition/Logbook_Peninsula/Objects/GoblinRelic", Type = RelicTypes.MonsterRarity },
+        new() { Path = "Metadata/Terrain/Gallows/Leagues/Expedition/Logbook_Wastes/Objects/Sulphite", Type = RelicTypes.MonsterRarity },
+        //new() { Path = "Metadata/Path/To/Another", Type = RelicTypes.SomeOtherType }
+    };
+
+    private BaseItemType _divineOrb;
+    private BaseItemType DivineOrb {
+        get {
+            _divineOrb ??= GameController.Files.BaseItemTypes.Contents.FirstOrDefault(x => x.Value.BaseName == "Divine Orb").Value;
+            return _divineOrb ?? throw new InvalidOperationException($"Could not find item: Divine Orb");
+        }
+    }
+    private double DivineOrbValue = 0;
 
     //~~| Modules |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     private UserInterface _userInterface;
-    private BaseItemType _divineOrb;
-    private double _divineValue = 0; 
+    private UserInterface UserInterface => _userInterface ??= new UserInterface(this);
+
+    //--| Initialise / construct |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     public Plugin() {
-        _verisiumRemnants = new TimeCache<List<VerisiumRemnant>>(() =>
-            GameController.EntityListWrapper.Entities
-                .Any(x => x.Metadata.StartsWith("Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter", StringComparison.Ordinal))
-                ? GameController.IngameState.IngameUi.ItemsOnGroundLabelsVisible
-                    .Where(x => x?.ItemOnGround?.Metadata?.StartsWith("Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter", StringComparison.Ordinal) == true)
-                    .Select(x => new VerisiumRemnant(x, x.Label.AsObject<Expedition2EncounterLabel>()))
-                    .ToList()
-                : [],
-            1000);
+        _relics = new TimeCache<List<Relic>>(() => GameController.IngameState.IngameUi.ItemsOnGroundLabelsVisible
+            .Where(label => label?.ItemOnGround?.Path != null)
+            .Select(label => {
+                var def = _relicDefinitions.FirstOrDefault(d => label.ItemOnGround.Path.StartsWith(d.Path, StringComparison.Ordinal));
+                return new { label, def };
+            })
+            .Where(x => x.def != null) // Filter out the ones that didn't match
+            .Select(x => new Relic(x.label, x.label.ItemOnGround, x.def!.Type))
+            .ToList(),
+        1000);
+        _verisiumRemnants = new TimeCache<List<VerisiumRemnant>>(() => {
+            var labelsOnGround = GameController.IngameState.IngameUi.ItemsOnGroundLabelsVisible
+                .Where(x => x?.ItemOnGround?.Metadata?.StartsWith("Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter", StringComparison.Ordinal) == true)
+                .ToList();
+
+            var entitiesWithLabels = labelsOnGround.Select(x => x.ItemOnGround).ToHashSet();
+
+            var results = labelsOnGround.Select(x => new VerisiumRemnant(x)).ToList();
+
+            var entitiesWithoutLabels = GameController.EntityListWrapper.Entities
+                .Where(e => e.Metadata?.StartsWith("Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter", StringComparison.Ordinal) == true)
+                .Where(e => !entitiesWithLabels.Contains(e));
+
+            foreach (var e in entitiesWithoutLabels) results.Add(new VerisiumRemnant(e));
+
+            return results;
+        }, 1000);
         _recipePrices = new TimeCache<Dictionary<Expedition2Recipe, RecipePrice>>(() => {
             var getCurrencyValue = GameController.PluginBridge.GetMethod<Func<BaseItemType, double>>("NinjaPrice.GetBaseItemTypeValue") ?? (_ => 0);
-            return GameController.Files.Expedition2Recipes.EntriesList.ToDictionary(recipe => recipe, recipe => {
-                double val;
-                bool overridden = false;
-                bool ninjaPriced = false;
+            DivineOrbValue = getCurrencyValue(DivineOrb);
 
-                if(_divineOrb != null) _divineValue = getCurrencyValue(_divineOrb); 
+            var overrideDict = Settings.PriceOverrides.ToDictionary(po => po.Recipee.Value);
 
-                if (Settings.PriceOverrides.FirstOrDefault(po => po.Recipee.Value == recipe.Id) is { } over) {
-                    val = over.Value;
-                    overridden = true;
+            return GameController.Files.Expedition2Recipes.EntriesList.ToDictionary(
+                recipe => recipe,
+                recipe => {
+                    double priceInExalts;
+                    double priceInDivines;
+                    bool overridden = false;
+                    bool ninjaPriced = false;
+
+                    // 3. Use the lookup dictionary
+                    if (overrideDict.TryGetValue(recipe.Id, out var over)) {
+                        priceInExalts = over.Value * DivineOrbValue;
+                        priceInDivines = over.Value;
+                        overridden = true;
+                    }
+                    else {
+                        var rewardVal = recipe.Reward == null ? 0 : getCurrencyValue(recipe.Reward);
+                        priceInExalts = rewardVal * recipe.RewardCount;
+                        priceInDivines = DivineOrbValue > 0 ? priceInExalts / DivineOrbValue : 0;
+                        ninjaPriced = recipe.Reward != null;
+                    }
+
+                    SColor color = priceInDivines >= Settings.ValueVeryGood ? Settings.ValueVeryGoodText_Color :
+                                   priceInDivines >= Settings.ValueGood ? Settings.ValueGoodText_Color :
+                                   Settings.ValueText_Color;
+
+                    return new RecipePrice(priceInExalts, priceInDivines, overridden, ninjaPriced, color);
                 }
-                else {
-                    val = (recipe.Reward == null ? 0 : getCurrencyValue(recipe.Reward)) * recipe.RewardCount;
-                    ninjaPriced = recipe.Reward != null;
-                }
-
-                SColor color = val >= Settings.ValueVeryGood ? Settings.ValueVeryGoodText_Color :
-                               val >= Settings.ValueGood ? Settings.ValueGoodText_Color :
-                               Settings.ValueText_Color;
-
-                return new RecipePrice(val, overridden, ninjaPriced, color);
-            });
+            );
         }, 1000);
     }
 
-    private UserInterface UserInterface => _userInterface ??= new UserInterface(this);
-    //--| Initialise |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     public override bool Initialise() {
         CanUseMultiThreading = true;
         Initialise_DXT();
 
-        _divineOrb = GameController.Files.BaseItemTypes.Contents.FirstOrDefault(x => x.Value.BaseName == "Divine Orb").Value;
+        
 
 
         return base.Initialise();
@@ -144,290 +271,284 @@ public class Plugin : BaseSettingsPlugin<Settings> {
         Settings.KnownRecipes.UnionWith(_recipePrices.Value.Keys.Select(x => x.Id));
     }
     //--| Render |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    private ColoredTextOptions _inGame_ColoredTextOptions = new ColoredTextOptions { };
-    private ColoredTextOptions _minimap_ColoredTextOptions = new ColoredTextOptions { Padding = new DXTPadding (1, 1, 1, 3) };
-    private ColoredTextOptions _minimapRerolled_ColoredTextOptions = new ColoredTextOptions { Padding = new DXTPadding(2, 2, 2, 4) };
-    private ColoredTextOptions _minimapHighlighted_ColoredTextOptions = new ColoredTextOptions { Padding = new DXTPadding(4, 4, 4, 6), BorderThickness = 2 };
-
-    private RemnantStatus GetRemnantStatus (Entity entity) {
-        var status = new RemnantStatus();
-        var states = entity?.GetComponent<StateMachine>()?.States;
-        if (states == null) return status;
-
-        foreach (var s in states) {
-            switch (s.Name) {
-                case "activated":
-                    int val = (int)s.Value;
-                    if (val == 3) status.IsActive = true;
-                    else if(val == 6) status.IsUnclaimedReward = true;
-                    else if (val == 7) status.IsCompleted = true;
-                    else if (val == 8) status.IsNotTagged = true;
-                    break;
-                case "is_rerolled":
-                    if ((int)s.Value == 1) status.IsRerolled = true;
-                    break;
-                case "in_placing_range":
-                    if ((int)s.Value == 1) status.IsHovered = true;
-                    break;
-            }
-        }
-        var socketState = states.FirstOrDefault(x => x.Name == "sockets");
-        if (socketState != null) {
-            status.RuneCount = (int)socketState.Value;
-        }
-
-        return status;
-    }
     public override void Render() {
         DBug.Render();
 
-        var entities = GameController.EntityListWrapper.ValidEntitiesByType[EntityType.IngameIcon]
-            .Where(x => x.Metadata.StartsWith("Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter", StringComparison.Ordinal)).ToList();
-        // Render Remnants
-        var areaLevel = GameController.IngameState.Data.CurrentAreaLevel;
-        var remnants = _verisiumRemnants.Value;
+        RenderRemnants();
+        RenderRelics();
+    }
+    //--| Relic |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    private void RenderRelics() {
+        foreach (var relic in _relics.Value) {
+            if (relic == null) continue;
 
-        if (remnants.Count > 0) {
-            var allRecipes = GameController.Files.Expedition2Recipes.EntriesList.ToLookup(x => x.RuneCountRequired);
+            var states = relic.Entity?.GetComponent<StateMachine>()?.States;
+            var isHovered = states?.Any(s => s.Name == "in_placing_range" && (int)s.Value == 1) ?? false;
 
-            if (allRecipes.Count > 0) {
-                var expedition2RunesWeights = GameController.Files.Expedition2RunesWeights.EntriesList;
-
-                _minimap_ColoredTextOptions.BgColor = Settings.BG_Color;
-                _minimapRerolled_ColoredTextOptions.BgColor = Settings.BG_Color;
-                _minimapRerolled_ColoredTextOptions.BorderColor = Settings.RerolledBorder_Color;
-                _minimapHighlighted_ColoredTextOptions.BgColor = Settings.BG_Color;
-                _minimapHighlighted_ColoredTextOptions.BorderColor = Settings.ExplosiveHover_Color;
-
-                _inGame_ColoredTextOptions.BgColor = Settings.BG_Color;
-                 
-                foreach (var remnant in remnants) {
-                    var entity = remnant.LabelOnGround.ItemOnGround;
-                    if (entity == null) continue;
-
-                    entities.Remove(entity);
-
-                    var remnantStatus = GetRemnantStatus(entity);
-                    if (remnantStatus.IsNotTagged) continue;
-                    if (remnantStatus.IsCompleted) {
-                        if (!Settings.DisplayCompletedRemnants) continue;
-                    }
-                    else if (remnantStatus.IsUnclaimedReward) {
-                        DrawUnclaimedRemnantRewrd(entity);
-                        continue;
-                    }
-
-                    var remnantRuneData = remnant.Expedition2EncounterLabel?.Data;
-                    var remnantTransferRunePositions = remnantRuneData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? new List<int>();
-                    var remnantRecipes = GetRemanantRecipes(expedition2RunesWeights, areaLevel, allRecipes, remnantRuneData);
-
-                    if (Settings.InGameRemnant_MinimumValueToShow > 0) {
-                        remnantRecipes = remnantRecipes.Where(remanantRecipe => remanantRecipe.recipePrice.Value >= Settings.InGameRemnant_MinimumValueToShow).ToList();
-                    }
-                    if (Settings.InGameRemnant_MaxItemsToShow > 0) {
-                        remnantRecipes = remnantRecipes.Take(Settings.InGameRemnant_MaxItemsToShow).ToList();
-                    }
-
-                    var remnantRect = remnant.Expedition2EncounterLabel.GetClientRect();
-                    var bottomLeft = remnantRect.BottomLeft;
-                    bottomLeft += new Vector2(Settings.InGameRemnant_RenderOffset.X, Settings.InGameRemnant_RenderOffset.Y);
-                    var y = bottomLeft.Y;
-                    var first = true;
-                    // Hover
-
-                    if (remnantStatus.IsHovered) Graphics.DrawFrame(remnantRect, Settings.ExplosiveHover_Color, 0, 5, 0);
-
-                    foreach (var (recipe, recipePrice) in remnantRecipes) {
-                        // Minimap Display
-                        if (first && Settings.MinimapRemnant_Show) {
-                            DrawRemnantOnMinimap(entity, remnantRuneData, recipePrice, remnantStatus);
-                        }
-                        // Ingame Display
-                        if (!remnantStatus.IsRerolled || first) { 
-                            var coloredText = new ColoredText();
-                            var displayValue = recipePrice.Value.ToString(recipePrice.Overridden ? "~F0" : "F0");
-
-                            coloredText.Add(GetValueText(recipePrice, remnantStatus.IsRerolled ? 0 : 7), recipePrice.Color);
-                            coloredText.Add($" {(string.IsNullOrWhiteSpace(recipe.Description) ? recipe.Reward?.BaseName : recipe.Description)}", recipePrice.Color);
-                            coloredText.Add($"  x{recipe.RewardCount}", recipePrice.Color);
-                            var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, _inGame_ColoredTextOptions);
-                            y += size.Y;
-                        }
-
-                        first = false;
-                    }
-
-                    // Ingame Transferred Rune Text
-                    y += 2;
-                    if (Settings.InGameRemnant_ShowTransferred && remnantTransferRunePositions.Count > 0) {
-                        if (!remnantStatus.IsRerolled) {
-                            foreach (var position in remnantTransferRunePositions) {
-                                var runes = remnantRecipes
-                                    .Select(item => item.recipe.Runes.ElementAtOrDefault(position)) 
-                                    .Where(x => x != null)
-                                    .Distinct()
-                                    .OrderBy(r => r.Id)
-                                    .ToList();
-
-
-                                var coloredText = new ColoredText();
-                                coloredText.Add($"All Rune {position + 1} Transfers: ", Settings.LabelText_Color);
-
-                                for (int i = 0; i < runes.Count; i++) {
-                                    if (i > 0) coloredText.Add(", ", Settings.LabelText_Color);
-
-                                    coloredText.Add(runes[i].Id, GetRuneColor(runes[i].Id));
-                                }
-
-                                var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, _inGame_ColoredTextOptions);
-                                y += size.Y;
-                            }
-                            y += 2;
-                        }
-                        if (remnantRuneData?.SelectedRecipe?.Runes != null && remnantTransferRunePositions.Count > 0) {
-                            var coloredText = new ColoredText();
-
-                            var transferredRunes = remnantTransferRunePositions
-                                .Select(pos => remnantRuneData.SelectedRecipe.Runes.ElementAtOrDefault(pos))
-                                .Where(x => x != null)
-                                .OrderBy(x => x.Id)
-                                .ToList();
-
-                            if (transferredRunes.Count > 0) coloredText.Add($"{(remnantStatus.IsRerolled ? "Locked" : "Selected")} Rune Transfers: ", Settings.LabelText_Color);
-
-                            for (int i = 0; i < transferredRunes.Count; i++) {
-                                var rune = transferredRunes[i];
-
-                                if (i > 0) coloredText.Add(", ", Settings.LabelText_Color);
-
-                                coloredText.Add(rune.Id, GetRuneColor(rune.Id));
-                            }
-
-                            var size = coloredText.Draw(Graphics, bottomLeft with { Y = y }, _inGame_ColoredTextOptions);
-                            y += size.Y;
-                        }
-                    }
-                }
-                // remnants without label on ground
-                if (Settings.MinimapRemnant_Show) {
-                    foreach (var entity in entities) {
-                        if (entity == null) continue;
-
-                        var remnantStatus = GetRemnantStatus(entity);
-                        if (remnantStatus.IsNotTagged) continue;
-                        if (remnantStatus.IsCompleted) {
-                            if (!Settings.DisplayCompletedRemnants) continue;
-                        }
-                        else if (remnantStatus.IsUnclaimedReward) {
-                            DrawUnclaimedRemnantRewrd(entity);
-                            continue;
-                        }
-
-                        var found = false;
-
-                        if (entity?.HashComponents.GetValueOrDefault((ushort)0x87B2) is not 0 and { } dataAddr) {
-                            var remnantRuneData = RemoteMemoryObject.GetObjectStatic<Expedition2EncounterData>(dataAddr);
-                            var remnantRecipes = GetRemanantRecipes(expedition2RunesWeights, areaLevel, allRecipes, remnantRuneData);
-                            var firstRemnantrecipe = remnantRecipes.FirstOrDefault();
-                            if (firstRemnantrecipe != default) {
-                                DrawRemnantOnMinimap(entity, remnantRuneData, firstRemnantrecipe.recipePrice, remnantStatus);
-                                found = true;
-                            }
-                            if (!found) {
-                                if (remnantStatus.RuneCount > 0) {
-                                    Graphics.DrawTextWithBackground($"Unknown rune {remnantStatus.RuneCount} sockets", Graphics.GridToMap(entity.GridPos, entity.GridPos), Color.Black);
-                                }
-                            }
-                        }
-                    }
-
-                }
-                // Expedition2Window Prices
-                if (GameController.IngameState.IngameUi.Expedition2Window is { IsVisible: true } expedition2Window) {
-                var windowRect = expedition2Window.GetClientRectCache;
-                var bookRect = expedition2Window.GetChildFromIndices(3)?.GetClientRectCache;
-                var bounds = (bookRect?.Width > 0) ? bookRect.Value : windowRect;
-
-                if (!IsDrawableRect(windowRect)) return; 
-
-                var options = expedition2Window.Options
-                    .Where(x => x is { IsValid: true, IsVisible: true, IsVisibleLocal: true, Recipe: not null })
-                    .Select(x => (x, GetPriceOrDefault(x.Recipe)))
-                    .OrderByDescending(x => x.Item2.Value)
-                    .ToList();
-                var first = true;
-                foreach (var (option, recipePrice) in options) {
-                    var optionRect = option.GetClientRectCache;
-                    if (!IsDrawableRect(optionRect) ||
-                        !bounds.Intersects(optionRect) ||
-                        !bounds.Contains(optionRect.TopLeft)) {
-                        continue;
-                    }
-
-                    var coloredText = new ColoredText();
-
-                    coloredText.Add($"{GetValueText(recipePrice, 5, false)}", recipePrice.Color);
-                    var position = ClampTextPosition(optionRect.TopRight, coloredText.Size, bounds);
-                    coloredText.Draw(Graphics, position, _inGame_ColoredTextOptions);
-                    first = false;
-                }
-            }
+            if (isHovered) {
+                var labelRect = relic.LabelOnGround.Label.GetClientRect();
+                Graphics.DrawFrame(labelRect, Settings.ExplosiveHover_Color, 0, 5, 0);
             }
         }
-
+        //GameController.InspectObject(_relics, "_relics");
     }
-    private void DrawUnclaimedRemnantRewrd(Entity entity) {
-        if (Settings.DisplayUnclaimedRewardRemnants) {
-            var coloredText = new ColoredText();
-            coloredText.Add("Unclaimed Reward!!", Settings.LabelText_Color);
-            coloredText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), _minimap_ColoredTextOptions);
-        }
-    }
+    //--| Remnants |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    private void DrawRemnantOnMinimap( VerisiumRemnant verisiumRemnant, RecipePrice bestRecipePrice ) {
+        var remnantTransferRunePositions = verisiumRemnant.RuneData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? [];
+        var selectedRecipe = verisiumRemnant.RuneData?.SelectedRecipe;
+        var selectedRecipeRuneCount = selectedRecipe?.Runes.Count ?? 0;
 
-    private void DrawRemnantOnMinimap(Entity entity, Expedition2EncounterData remnantData, RecipePrice recipePrice, RemnantStatus remnantStatus) {
-        //var expedition2RunesWeights = GameController.Files.Expedition2RunesWeights.EntriesList;
-        var remnantTransferRunePositions = remnantData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? [];
+        var coloredText = new ColoredText(Graphics);
 
-        var selectedRecipee = remnantData?.SelectedRecipe;
-        bool HasSelectedRecipee = selectedRecipee?.Runes != null && selectedRecipee?.Runes.Count > 2;
-
-        var coloredMinimapText = new ColoredText();
-        var defaultColor = Settings.LabelText_Color;
-
-        coloredMinimapText.Add($"{(remnantStatus.IsRerolled ? "*" : "")}Rune[{remnantData.RuneCount}]:", defaultColor);
-
-        if (HasSelectedRecipee) {
-            var selectedRecipeePrice = GetPriceOrDefault(selectedRecipee);
-            coloredMinimapText.Add($"{GetValueText(selectedRecipeePrice)}", selectedRecipeePrice.Color);
+        if (selectedRecipeRuneCount > 0) {
+            coloredText.Add($"[{selectedRecipeRuneCount}]", Settings.LabelText_Color);
+            var selectedRecipePrice = GetRecipePriceOrDefault(selectedRecipe);
+            coloredText.Add($"{selectedRecipePrice.Format()}", selectedRecipePrice.Color);
         }
         else {
-            coloredMinimapText.Add($"{GetValueText(recipePrice)}", recipePrice.Color);
+            coloredText.Add($"[{verisiumRemnant.RuneData?.RuneCount}]", Settings.LabelText_Color);
+            coloredText.Add($"{bestRecipePrice.Format()}", bestRecipePrice.Color);
         }
 
-        if (Settings.MinimapRemnant_ShowTransferred && HasSelectedRecipee && remnantTransferRunePositions.Count > 0) {
+        if (Settings.MinimapRemnant_ShowTransferred && selectedRecipeRuneCount > 0 && remnantTransferRunePositions.Count > 0) {
             var transferredRunes = remnantTransferRunePositions
-                .Select(pos => selectedRecipee.Runes.ElementAtOrDefault(pos))
+                .Select(pos => selectedRecipe.Runes.ElementAtOrDefault(pos))
                 .Where(x => x != null)
                 .OrderBy(x => x.Id)
                 .ToList();
 
-            if (transferredRunes.Count > 0) coloredMinimapText.Add(" [T]:", defaultColor);
+            if (transferredRunes.Count > 0) coloredText.Add(" [T]", Settings.LabelText_Color);
 
             for (int i = 0; i < transferredRunes.Count; i++) {
                 var rune = transferredRunes[i];
 
-                if (i > 0) coloredMinimapText.Add(", ", defaultColor);
+                if (i > 0) coloredText.Add(",", Settings.LabelText_Color);
 
-                coloredMinimapText.Add(rune.Id, GetRuneColor(rune.Id));
+                coloredText.Add(rune.Id, GetRuneColor(rune.Id));
             }
         }
-        coloredMinimapText.Draw(Graphics, Graphics.GridToMap(entity.GridPos, entity.GridPos), remnantStatus.IsHovered ? _minimapHighlighted_ColoredTextOptions : remnantStatus.IsRerolled ? _minimapRerolled_ColoredTextOptions : _minimap_ColoredTextOptions);
+        var gridCenter = Graphics.GridToMap(verisiumRemnant.Entity.GridPos, verisiumRemnant.Entity.GridPos);
+        var centeredPos = new SVector2(
+            gridCenter.X - (coloredText.Size.X / 2),
+            gridCenter.Y - (coloredText.Size.Y / 2)
+        );
+        var padding = new DXTPadding(0, 0, 2, 3);
+        var coloredTextOptions = new ColoredTextOptions { BgColor = Settings.BG_Color, Padding = padding };
+        if (verisiumRemnant.Status.IsHovered) {
+            coloredTextOptions.Padding = padding.Expand(2,2);
+            coloredTextOptions.BorderThickness = 2;
+            coloredTextOptions.BorderColor = Settings.ExplosiveHover_Color;
+        }
+        else if(verisiumRemnant.Status.IsRerolled) {
+            coloredTextOptions.Padding = padding.Expand(2, 2);
+            coloredTextOptions.BorderThickness = 2;
+            coloredTextOptions.BorderColor = Settings.RerolledBorder_Color;
+        }
+        else if (selectedRecipeRuneCount > 0) {
+            coloredTextOptions.Padding = padding.Expand(2, 2);
+            coloredTextOptions.BorderThickness = 2;
+            coloredTextOptions.BorderColor = Settings.SelectedBorder_Color;
+        }
 
+        coloredText.Draw(centeredPos, coloredTextOptions);
+    }
+    private void DrawUnclaimedReward(VerisiumRemnant verisiumRemnant) {
+        if (Settings.DisplayUnclaimedRewardRemnants) {
+            var coloredText = new ColoredText(Graphics);
+            coloredText.Add("Unclaimed Reward!!", Settings.LabelText_Color);
 
+            var gridCenter = Graphics.GridToMap(verisiumRemnant.Entity.GridPos, verisiumRemnant.Entity.GridPos);
+            var centeredPos = new SVector2(
+                gridCenter.X - (coloredText.Size.X / 2),
+                gridCenter.Y - (coloredText.Size.Y / 2)
+            );
+
+            var coloredTextOptions = new ColoredTextOptions { BgColor = Settings.BG_Color, Padding = new DXTPadding(2, 0, 2, 3) };
+            coloredText.Draw(centeredPos, coloredTextOptions);
+        }
     }
 
+    private void DrawRemnant(VerisiumRemnant verisiumRemnant, List<(Expedition2Recipe, RecipePrice)> remnantRecipes) {
+        if (verisiumRemnant.Expedition2EncounterLabel == null) return;
 
-    //--| Remnants |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        var coloredTextOptions = new ColoredTextOptions { BgColor = Settings.BG_Color, Padding = new DXTPadding(0, 0, 2, 3) };
+        var remnantRect = verisiumRemnant.Expedition2EncounterLabel.GetClientRect();
+        var labelStartPos = remnantRect.BottomLeft;
+        labelStartPos += new Vector2(Settings.InGameRemnant_RenderOffset.X, Settings.InGameRemnant_RenderOffset.Y);
+        var currentY = labelStartPos.Y;
+
+        if (verisiumRemnant.Status.IsHovered) Graphics.DrawFrame(remnantRect, Settings.ExplosiveHover_Color, 0, 5, 0);
+
+        // Draw recipe list
+        var shownRemnantRecipes = remnantRecipes.Take(Settings.InGameRemnant_MaxItemsToShow).ToList();
+        foreach (var (recipe, recipePrice) in shownRemnantRecipes) {
+            var coloredText = new ColoredText(Graphics);
+
+            coloredText.Add(recipePrice.Format(7), recipePrice.Color);
+            coloredText.Add($" {(string.IsNullOrWhiteSpace(recipe.Description) ? recipe.Reward?.BaseName : recipe.Description)}", recipePrice.Color);
+            coloredText.Add($"  x{recipe.RewardCount}", recipePrice.Color);
+            var size = coloredText.Draw(labelStartPos with { Y = currentY }, coloredTextOptions);
+            currentY += size.Y;
+        }
+        currentY += shownRemnantRecipes.Count > 0 ? 2 : 0;
+
+        // draw all possible transferred runes
+        var remnantTransferRunePositions = verisiumRemnant.RuneData?.PassedOnRunePositions?.OrderBy(x => x).ToList() ?? new List<int>();
+        if (remnantTransferRunePositions.Count > 0 && !verisiumRemnant.Status.IsRerolled) {
+            foreach (var position in remnantTransferRunePositions) {
+                var runes = remnantRecipes
+                    .Select(item => item.Item1.Runes.ElementAtOrDefault(position))
+                    .Where(x => x != null)
+                    .Distinct()
+                    .OrderBy(r => r.Id)
+                    .ToList();
+
+                var coloredText = new ColoredText(Graphics);
+                coloredText.Add($"Rune {position + 1} possible Transfers: ", Settings.LabelText_Color);
+                for (int i = 0; i < runes.Count; i++) {
+                    if (i > 0) coloredText.Add(",", Settings.LabelText_Color);
+                    coloredText.Add(runes[i].Id, GetRuneColor(runes[i].Id));
+                }
+
+                var size = coloredText.Draw(labelStartPos with { Y = currentY }, coloredTextOptions);
+                currentY += size.Y;
+            }
+            currentY += 2;
+        }
+        // Draw selected / Locked Recipe
+        var selectedRecipe = verisiumRemnant.RuneData?.SelectedRecipe;
+        var selectedRecipeRuneCount = selectedRecipe?.Runes.Count ?? 0;
+
+        if (selectedRecipeRuneCount > 0) {
+            var selectedRecipePrice = GetRecipePriceOrDefault(selectedRecipe);
+            var coloredText = new ColoredText(Graphics);
+
+            if (verisiumRemnant.Status.IsRerolled)
+                coloredText.Add($"Rolled Recipe:", Settings.LabelText_Color);
+            else
+                coloredText.Add($"Selected Recipe:", Settings.LabelText_Color);
+            
+            coloredText.Add($"{selectedRecipePrice.Format()}", selectedRecipePrice.Color);
+
+            coloredText.Add($" {(string.IsNullOrWhiteSpace(selectedRecipe.Description) ? selectedRecipe.Reward?.BaseName : selectedRecipe.Description)}", selectedRecipePrice.Color);
+            coloredText.Add($" x{selectedRecipe.RewardCount}", selectedRecipePrice.Color);
+
+            coloredText.Add($" #Runes:{selectedRecipeRuneCount}", Settings.LabelText_Color);
+
+            var transferredRunes = remnantTransferRunePositions
+                .Select(pos => selectedRecipe.Runes.ElementAtOrDefault(pos))
+                .Where(x => x != null)
+                .OrderBy(x => x.Id)
+                .ToList();
+
+            if (transferredRunes.Count > 0) {
+                coloredText.Add($" Transfers:", Settings.LabelText_Color);
+                for (int i = 0; i < transferredRunes.Count; i++) {
+                    var rune = transferredRunes[i];
+
+                    if (i > 0) coloredText.Add(",", Settings.LabelText_Color);
+                    coloredText.Add(rune.Id, GetRuneColor(rune.Id));
+                }
+            }
+            var size = coloredText.Draw(labelStartPos with { Y = currentY }, coloredTextOptions);
+            currentY += size.Y;
+        }
+    }
+
+    private void RenderRemnants() {
+
+        var verisiumRemnants = _verisiumRemnants.Value;
+        var areaLevel = GameController.IngameState.Data.CurrentAreaLevel;
+        var allRecipes = GameController.Files.Expedition2Recipes.EntriesList;
+        var expedition2RunesWeights = GameController.Files.Expedition2RunesWeights.EntriesList;
+
+        // Render Remnants
+        foreach (var verisiumRemnant in verisiumRemnants) {
+            if (verisiumRemnant == null) continue;
+
+            verisiumRemnant.Update();
+
+            if (verisiumRemnant.Status.IsNotTagged) continue;
+            if (verisiumRemnant.Status.IsCompleted && !Settings.DisplayCompletedRemnants) continue;
+            if (verisiumRemnant.Status.IsPending && !Settings.DisplayPendingRemnants) continue;
+            if (verisiumRemnant.Status.IsActive && !Settings.DisplayActiveRemnants) continue;
+            if (verisiumRemnant.Status.IsUnclaimedReward) {
+                DrawUnclaimedReward(verisiumRemnant);
+                continue;
+            }
+
+            // Get Remnants Recipes
+            var remnantRecipes = GetRemanantRecipes(expedition2RunesWeights, areaLevel, allRecipes, verisiumRemnant.RuneData);
+
+            if (remnantRecipes.Count > 0) {
+                var (bestRecipe, bestRecipeePrice) = remnantRecipes[0];
+
+                if (Settings.MinimapRemnant_Show) DrawRemnantOnMinimap(verisiumRemnant, bestRecipeePrice);
+
+                if (Settings.InGameRemnant_Show) DrawRemnant(verisiumRemnant, remnantRecipes);
+            }
+
+        }
+
+        // Expedition2Window Prices
+        if (GameController.IngameState.IngameUi.Expedition2Window is { IsVisible: true } expedition2Window) {
+            var coloredTextOptions = new ColoredTextOptions { BgColor = Settings.BG_Color, Padding = new DXTPadding(0, 0, 2, 3) };
+            var windowRect = expedition2Window.GetClientRectCache;
+            var bookRect = expedition2Window.GetChildFromIndices(3)?.GetClientRectCache;
+            var bounds = (bookRect?.Width > 0) ? bookRect.Value : windowRect;
+
+            if (!IsDrawableRect(windowRect)) return;
+
+            var options = expedition2Window.Options
+                .Where(x => x is { IsValid: true, IsVisible: true, IsVisibleLocal: true, Recipe: not null })
+                .Select(x => (x, GetRecipePriceOrDefault(x.Recipe)))
+                .OrderByDescending(x => x.Item2.PriceInExalts)
+                .ToList();
+            foreach (var (option, recipePrice) in options) {
+                var optionRect = option.GetClientRectCache;
+                if (!IsDrawableRect(optionRect) ||
+                    !bounds.Intersects(optionRect) ||
+                    !bounds.Contains(optionRect.TopLeft)) {
+                    continue;
+                }
+
+                var coloredText = new ColoredText(Graphics);
+
+                coloredText.Add($"{recipePrice.Format(5, false)}", recipePrice.Color);
+                var position = ClampTextPosition(optionRect.TopRight, coloredText.Size, bounds);
+                coloredText.Draw(position, coloredTextOptions);
+            }
+        }
+    }
+
+    private RecipePrice GetRecipePriceOrDefault(Expedition2Recipe recipe) {
+        return recipe != null && _recipePrices.Value.TryGetValue(recipe, out var recipePrice) ? recipePrice : new RecipePrice(Settings.ValueText_Color);
+    }
+    private List<(Expedition2Recipe recipe, RecipePrice recipePrice)> GetRemanantRecipes(List<Expedition2RunesWeight> expedition2RunesWeights, int areaLevel, List<Expedition2Recipe> allRecipes, Expedition2EncounterData? data) {
+        var allowedRuneCounts = expedition2RunesWeights.Where(x => x.RuneSlot - 1 == data?.FixedRunePosition)
+            .Where(runeWeight => runeWeight.Rune?.Equals(data?.FixedRune) == true)
+            .Where(runeWeight => runeWeight.Level <= areaLevel)
+            .Select(runeWeight => runeWeight.SlotCount)
+            .ToHashSet();
+
+        var recipes = allRecipes.Where(recipe => recipe.RuneCountRequired <= data?.RuneCount)
+            .Where(recipe => allowedRuneCounts.Contains(recipe.RuneCountRequired))
+            .Where(recipe => recipe.MinLevelReq <= areaLevel && recipe.MaxLevelReq >= areaLevel)
+            .Where(recipe => recipe.Runes.ElementAtOrDefault(data?.FixedRunePosition ?? 0)?.Equals(data?.FixedRune) == true)
+            .Select(recipe => (recipe, recipePrice: GetRecipePriceOrDefault(recipe)))
+            .OrderByDescending(recipe => recipe.recipePrice.PriceInExalts)
+            .ToList();
+
+        return recipes;
+    }
+    private static bool IsDrawableRect(RectangleF rect) {
+        return rect.Width > 1 && rect.Height > 1;
+    }
+    private static Vector2 ClampTextPosition(Vector2 position, Vector2 textSize, RectangleF bounds) {
+        var maxX = Math.Max(bounds.Left, bounds.Right - textSize.X);
+        var maxY = Math.Max(bounds.Top, bounds.Bottom - textSize.Y);
+        return new Vector2(Math.Clamp(position.X, bounds.Left, maxX), Math.Clamp(position.Y, bounds.Top, maxY));
+    }
     private static SColor PurpleRuneColor = SColor.FromArgb(230, 105, 251);
     private static SColor BlueRuneColor = SColor.FromArgb(130, 177, 255);
     private static SColor GoldRuneColor = SColor.FromArgb(255, 255, 109);
@@ -441,6 +562,7 @@ public class Plugin : BaseSettingsPlugin<Settings> {
         { "Power", PurpleRuneColor },
         { "Soul", PurpleRuneColor },
         { "Time", PurpleRuneColor },
+        { "Rebirth", PurpleRuneColor }, // was blut but i think its  as good as a purple
 
         // Propagation Runes (Gold/Yellow)
         { "Bait", GoldRuneColor },
@@ -466,7 +588,6 @@ public class Plugin : BaseSettingsPlugin<Settings> {
         { "Prismatic", BlueRuneColor },
         { "Protective", BlueRuneColor },
         { "Rage", BlueRuneColor },
-        { "Rebirth", BlueRuneColor },
         { "Sky", BlueRuneColor },
         { "Stone", BlueRuneColor },
         { "Tempest", BlueRuneColor },
@@ -478,52 +599,6 @@ public class Plugin : BaseSettingsPlugin<Settings> {
     private SColor GetRuneColor(string runeId) {
         return _runeColors.TryGetValue(runeId, out var color) ? color : Settings.LabelText_Color;
     }
-    private string GetValueText(RecipePrice recipePrice, int padding = 0, bool padLeft = true) {
-        var value = recipePrice.Value;
-        var useDivines = Settings.ShowValueInDivines && _divineValue > 0;
-
-        if (useDivines) value /= _divineValue;
-
-        var format = recipePrice.Overridden
-            ? (useDivines ? "~F2" : "~F0")
-            : (useDivines ? "F2" : "F0");
-
-        var text = value.ToString(format);
-
-        if (useDivines && text.StartsWith("0."))
-            text = text.Substring(1);
-
-        return padLeft ? text.PadLeft(padding) : text.PadRight(padding);
-    }
-    
-    private List<(Expedition2Recipe recipe, RecipePrice recipePrice)> GetRemanantRecipes(List<Expedition2RunesWeight> expedition2RunesWeights, int areaLevel, ILookup<int, Expedition2Recipe> allRecipes, Expedition2EncounterData data) {
-        var allowedRuneCounts = expedition2RunesWeights.Where(x => x.RuneSlot - 1 == data?.FixedRunePosition)
-            .Where(runeWeight => runeWeight.Rune?.Equals(data?.FixedRune) == true)
-            .Where(runeWeight => runeWeight.Level <= areaLevel)
-            .Select(runeWeight => runeWeight.SlotCount)
-            .ToHashSet();
-
-        var recipes = allRecipes.Where(x => x.Key <= data?.RuneCount)
-            .SelectMany(x => x)
-            .Where(x => allowedRuneCounts.Contains(x.RuneCountRequired))
-            .Where(x => x.MinLevelReq <= areaLevel && x.MaxLevelReq >= areaLevel)
-            .Where(x => x.Runes.ElementAtOrDefault(data?.FixedRunePosition ?? 0)?.Equals(data?.FixedRune) == true)
-            .Select(x => (x, price: GetPriceOrDefault(x)))
-            .OrderByDescending(x => x.price.Value)
-            .ToList();
-
-        return recipes;
-    }
-    private RecipePrice GetPriceOrDefault(Expedition2Recipe recipe) {
-        return recipe != null && _recipePrices.Value.TryGetValue(recipe, out var recipePrice) ? recipePrice : new RecipePrice(0, false, false, Settings.ValueText_Color);
-    }
-    private static bool IsDrawableRect(RectangleF rect) {
-        return rect.Width > 1 && rect.Height > 1;
-    }
-    private static Vector2 ClampTextPosition(Vector2 position, Vector2 textSize, RectangleF bounds) {
-        var maxX = Math.Max(bounds.Left, bounds.Right - textSize.X);
-        var maxY = Math.Max(bounds.Top, bounds.Bottom - textSize.Y);
-        return new Vector2(Math.Clamp(position.X, bounds.Left, maxX), Math.Clamp(position.Y, bounds.Top, maxY));
-    }
+       
 
 }

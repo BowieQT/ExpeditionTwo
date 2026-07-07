@@ -30,11 +30,16 @@ public sealed class UserInterface : PluginModule {
 
         ImGui.Text("* = Rune Rerolled");
 
-        DXT.Checkbox.Draw("Show Values in Divine Orbs", ref Settings.ShowValueInDivines);
+        //DXT.Checkbox.Draw("Show Values in Divine Orbs", ref Settings.ShowValueInDivines);
 
         DXT.Checkbox.Draw("Show Remnants with Unclaimed Rewards", ref Settings.DisplayUnclaimedRewardRemnants);
 
+        DXT.Checkbox.Draw("Show Active Remnants", ref Settings.DisplayActiveRemnants);
+
+        DXT.Checkbox.Draw("Show Pending Remnants", ref Settings.DisplayPendingRemnants);
+
         DXT.Checkbox.Draw("Show Completed Remnants", ref Settings.DisplayCompletedRemnants);
+
 
         ImGui.Spacing(); ImGui.Separator(); ImGui.Spacing();
 
@@ -46,36 +51,40 @@ public sealed class UserInterface : PluginModule {
         ImGui.Spacing(); ImGui.Separator(); ImGui.Spacing();
 
 
-        DXT.Checkbox.Draw("Draw Transfered runes in game", ref Settings.InGameRemnant_ShowTransferred);
+        DXT.Checkbox.Draw("Draw on Remnant", ref Settings.InGameRemnant_Show);
 
-        DXT.Slider.Draw("MinimumValueToShow", ref Settings.InGameRemnant_MinimumValueToShow, new DXT.Slider.Options { Max = 1000, Width = 100 });
-        ImGui.SameLine();
-        ImGui.Text($"Minimum Value recipes To Show");
+        //DXT.Slider.Draw("MinimumValueToShow", ref Settings.InGameRemnant_MinimumValueToShow, new DXT.Slider.Options { Max = 1000, Width = 100 });
+        //ImGui.SameLine();
+        //ImGui.Text($"Minimum Value recipes To Show");
 
         DXT.Slider.Draw("MaxItemsToShow", ref Settings.InGameRemnant_MaxItemsToShow, new DXT.Slider.Options { Max = 20, Width = 100 });
         ImGui.SameLine();
-        ImGui.Text($"Max Recipees To Show");
+        ImGui.Text($"Max recipees To Show on Remnant");
 
         DXT.Slider.Draw("RenderOffsetX", ref Settings.InGameRemnant_RenderOffset.X, new DXT.Slider.Options { Max = 50, Width = 100 });
         ImGui.SameLine();
         DXT.Slider.Draw("RenderOffsetY", ref Settings.InGameRemnant_RenderOffset.Y, new DXT.Slider.Options { Max = 50, Width = 100 });
         ImGui.SameLine();
-        ImGui.Text("In game render offfset");
+        ImGui.Text("Remnant render offfset");
 
         ImGui.Spacing(); ImGui.Separator(); ImGui.Spacing();
 
 
-        DXT.ColorSelect.Draw("BG_Color", "Text BG Color", ref Settings.BG_Color);
+        DXT.ColorSelect.Draw("BG_Color", "Label Background Color", ref Settings.BG_Color);
         ImGui.SameLine();
-        ImGui.Text("Text BG Color");
-
-        DXT.ColorSelect.Draw("RerolledBorder_Color", "Rerolled Rune Border", ref Settings.RerolledBorder_Color);
-        ImGui.SameLine();
-        ImGui.Text("Rerolled Rune Border");
+        ImGui.Text("Label Background Color");
 
         DXT.ColorSelect.Draw("ExplosiveHover_Color", "Explosive Hover Border Color", ref Settings.ExplosiveHover_Color);
         ImGui.SameLine();
-        ImGui.Text("Explosive Hover Border Color");
+        ImGui.Text("Explosive Hovered Border Color");
+
+        DXT.ColorSelect.Draw("RerolledBorder_Color", "Rerolled Border Border", ref Settings.RerolledBorder_Color);
+        ImGui.SameLine();
+        ImGui.Text("Rerolled Border Color");
+
+        DXT.ColorSelect.Draw("SelectedBorder_Color", "Selected Recipe Border Border", ref Settings.SelectedBorder_Color);
+        ImGui.SameLine();
+        ImGui.Text("Selected Recipe Border Color");
 
         DXT.ColorSelect.Draw("LabelText_Color", "Label Color", ref Settings.LabelText_Color);
         ImGui.SameLine();
@@ -83,19 +92,19 @@ public sealed class UserInterface : PluginModule {
 
         DXT.ColorSelect.Draw("ValueText_Color", "Value Color", ref Settings.ValueText_Color);
         ImGui.SameLine();
-        ImGui.Text("Value Color");
+        ImGui.Text("Value(Divines) Color");
 
         DXT.ColorSelect.Draw("ValueGoodText_Color", "Good Value Color", ref Settings.ValueGoodText_Color);
         ImGui.SameLine();
-        DXT.Slider.Draw("ValueGood", ref Settings.ValueGood, new DXT.Slider.Options { Max = 5000, Width = 100 });
+        DXT.Slider.Draw("ValueGood", ref Settings.ValueGood, new DXT.Slider.Options { Max = 100, Width = 100 });
         ImGui.SameLine();
-        ImGui.Text("Good Value");
+        ImGui.Text("Good Value(Divines)");
 
         DXT.ColorSelect.Draw("ValueVeryGoodText_Color", "Very Good Value Color", ref Settings.ValueVeryGoodText_Color);
         ImGui.SameLine();
-        DXT.Slider.Draw("ValueVeryGood", ref Settings.ValueVeryGood, new DXT.Slider.Options { Max = 5000, Width = 100 });
+        DXT.Slider.Draw("ValueVeryGood", ref Settings.ValueVeryGood, new DXT.Slider.Options { Max = 100, Width = 100, ShiftStep = .1f });
         ImGui.SameLine();
-        ImGui.Text("Very Good Value");
+        ImGui.Text("Very Good Value(Divines)");
 
         //if (DXT.Button.Draw($"logButton", new DXT.Button.Options { Label = "Dump", Width = 100 })) {
         //    var allRunes = GameController.Files.Expedition2Runes.EntriesList;
@@ -129,7 +138,7 @@ public sealed class UserInterface : PluginModule {
             priceOverride.Recipee.Value = recipee;
 
             ImGui.SameLine();
-            DXT.Slider.Draw($"priceOverrideValue{i}", ref priceOverride.Value, new DXT.Slider.Options { Max = 1000, Width = (int)sharedWidth });
+            DXT.Slider.Draw($"priceOverrideValue{i}", ref priceOverride.Value, new DXT.Slider.Options { Max = 100, ShiftStep = .1f, Width = (int)sharedWidth });
 
             ImGui.SameLine();
             if (DXT.Button.Draw($"priceOverrideRemove{i}", new DXT.Button.Options { Label = "Remove", Width = buttonWidth })) Settings.PriceOverrides.RemoveAt(i);
